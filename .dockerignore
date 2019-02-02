@@ -1,0 +1,7 @@
+# Ignore everything
+**
+
+# Only include these files.
+!/src/**
+!/Cargo.toml
+!/Cargo.lock

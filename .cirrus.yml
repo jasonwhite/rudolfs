@@ -1,0 +1,32 @@
+# Check that formatting is correct using nightly rust.
+fmt_task:
+  container:
+    image: rustlang/rust:nightly
+  install_script: rustup component add rustfmt-preview
+  check_script: cargo fmt -- --check
+
+# Run clippy.
+clippy_task:
+  container:
+    image: rustlang/rust:nightly
+  cargo_cache:
+    folder: $CARGO_HOME/registry
+    fingerprint_script: cat Cargo.lock
+  install_script: rustup component add clippy-preview
+  check_script: cargo clippy
+  before_cache_script: rm -rf $CARGO_HOME/registry/index
+
+# Build and test.
+test_task:
+  matrix:
+    - container:
+        image: rust:latest
+    - allow_failures: true
+      container:
+        image: rustlang/rust:nightly
+  cargo_cache:
+    folder: $CARGO_HOME/registry
+    fingerprint_script: cat Cargo.lock
+  build_script: cargo build
+  test_script: cargo test
+  before_cache_script: rm -rf $CARGO_HOME/registry/index

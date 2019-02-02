@@ -1,0 +1,37 @@
+[package]
+name = "rudolfs"
+version = "0.1.0"
+authors = ["Jason White"]
+edition = "2018"
+
+[dependencies]
+bytes = "0.4"
+chacha = "0.3"
+derive_more = "0.14"
+futures = "0.1"
+generic-array = "0.12"
+hex = "0.3"
+http = "0.1"
+human-size = "0.4"
+humantime = "1"
+hyper = "0.12"
+linked-hash-map = { version = "0.5", features = ["serde_impl"] }
+log = "0.4"
+pretty_env_logger = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.8"
+structopt = "0.2"
+tokio = "0.1"
+url = "1"
+uuid = { version = "0.7", features = ["v4"] }
+
+[dependencies.rusoto_core]
+version = "0.36"
+default_features = false
+features = ["rustls"]
+
+[dependencies.rusoto_s3]
+version = "0.36"
+default_features = false
+features = ["rustls"]

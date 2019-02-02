@@ -1,0 +1,6 @@
+max_width = 80
+error_on_line_overflow = true
+error_on_unformatted = true
+normalize_comments = true
+wrap_comments = true
+license_template_path = ".license_template"
