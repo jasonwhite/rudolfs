@@ -29,7 +29,7 @@ use http::{
     uri::{Authority, Scheme},
     StatusCode, Uri,
 };
-use hyper::{self, service::Service, Method, Request, Response, Chunk};
+use hyper::{self, service::Service, Chunk, Method, Request, Response};
 
 use crate::error::Error;
 use crate::hyperext::{into_request, Body, IntoResponse, RequestExt};
