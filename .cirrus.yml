@@ -30,3 +30,34 @@ test_task:
   build_script: cargo build
   test_script: cargo test
   before_cache_script: rm -rf $CARGO_HOME/registry/index
+
+# Publish Cargo releases
+publish_task:
+  only_if: $CIRRUS_TAG != ''
+  depends_on:
+    - fmt
+    - clippy
+    - test
+  container:
+    image: rust:latest
+  env:
+    CARGO_TOKEN: ENCRYPTED[24c3996bcead2ad8411ef58926d1efd19a08dcdfd99dbf21f900155bd676908db322dec354b026f9ba3e5094e789c6d1]
+  cargo_cache:
+    folder: $CARGO_HOME/registry
+    fingerprint_script: cat Cargo.lock
+  publish_script: cargo publish --token "$CARGO_TOKEN"
+
+# Build releases
+tag_docker_builder:
+  only_if: $CIRRUS_TAG != ''
+  env:
+    DOCKER_USERNAME: ENCRYPTED[e27aa1f15f278868b84497fd0fbd007127251ed44de671de28cee8c0669ff5b886980a409da9bae8c5cff6dbe88fe289]
+    DOCKER_PASSWORD: ENCRYPTED[491d248564335b8760a65f9c69f970d3ba6bf9ba169f9e6f93836e8a7360d13f421afd4630f71d8981182da0bf26c2dd]
+  build_script: docker build --tag jasonwhite0/rudolfs:$CIRRUS_TAG --tag jasonwhite0/rudolfs:latest .
+  login_script: echo "$DOCKER_PASSWORD" | docker login --username "$DOCKER_USERNAME" --password-stdin
+  push_script: docker push jasonwhite0/rudolfs:$CIRRUS_TAG && docker push jasonwhite0/rudolfs:latest
+
+# Build the dockerfile, but don't publish it.
+build_docker_builder:
+  only_if: $CIRRUS_TAG == ''
+  build_script: docker build .

@@ -3,6 +3,16 @@ name = "rudolfs"
 version = "0.1.0"
 authors = ["Jason White"]
 edition = "2018"
+description = """
+A high-performance, caching Git LFS server with an AWS S3 back-end.
+"""
+documentation = "https://github.com/jasonwhite/rudolfs"
+homepage = "https://github.com/jasonwhite/rudolfs"
+repository = "https://github.com/jasonwhite/rudolfs"
+readme = "README.md"
+keywords = ["git-lfs", "s3"]
+categories = ["command-line-utilities"]
+license = "MIT"
 
 [dependencies]
 bytes = "0.4"
