@@ -8,6 +8,8 @@ RUN \
 	apt-get -y install ca-certificates musl-tools && \
 	rustup target add ${CARGO_BUILD_TARGET}
 
+ENV PKG_CONFIG_ALLOW_CROSS=1
+
 # Use Tini as our PID 1. This will enable signals to be handled more correctly.
 #
 # Note that this can't be downloaded inside the scratch container as we have no
@@ -18,10 +20,6 @@ RUN \
 ENV TINI_VERSION v0.18.0
 ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-static /tini
 RUN chmod +x /tini
-
-WORKDIR /source
-
-ENV PKG_CONFIG_ALLOW_CROSS=1
 
 # Build the real project.
 COPY ./ ./
