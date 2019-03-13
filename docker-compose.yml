@@ -2,10 +2,10 @@
 version: '3'
 services:
   app:
-    #image: rudolfs:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: jasonwhite0/rudolfs:latest
+    #build:
+    #  context: .
+    #  dockerfile: Dockerfile
     ports:
       - "8081:8080"
     volumes:
