@@ -21,6 +21,15 @@ A high-performance, caching Git LFS server with an AWS S3 back-end.
    project names in the URL and they are automatically created. If two projects
    share many LFS objects, have them use the same URL to save on storage space.
 
+The back-end storage code is very modular and composable. PRs for implementing
+other storage back-ends are welcome. If you begin working on this, please let us
+know by submitting an issue.
+
+## Non-Features
+
+ - There is no client authentication. This is meant to be run in an internal
+   network with clients you trust, not on the internet with malicious actors.
+
 ## Running It
 
 ### Generate an encryption key
