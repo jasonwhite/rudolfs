@@ -31,7 +31,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
-use super::{LFSObject, Storage, StorageFuture, StorageStream};
+use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
 use crate::lfs::Oid;
 
 pub struct Backend {
@@ -46,15 +46,26 @@ impl Backend {
 
     // Use sub directories in order to better utilize the file system's internal
     // tree data structure.
-    fn key_to_path(&self, oid: &Oid) -> PathBuf {
-        self.root.join(format!("objects/{}", oid.path()))
+    fn key_to_path(&self, key: &StorageKey) -> PathBuf {
+        if let Some(namespace) = key.namespace() {
+            self.root.join(format!(
+                "objects/{}/{}",
+                namespace,
+                key.oid().path()
+            ))
+        } else {
+            self.root.join(format!("objects/{}", key.oid().path()))
+        }
     }
 }
 
 impl Storage for Backend {
     type Error = io::Error;
 
-    fn get(&self, key: &Oid) -> StorageFuture<Option<LFSObject>, Self::Error> {
+    fn get(
+        &self,
+        key: &StorageKey,
+    ) -> StorageFuture<Option<LFSObject>, Self::Error> {
         Box::new(
             fs::File::open(self.key_to_path(key))
                 .and_then(fs::File::metadata)
@@ -80,10 +91,10 @@ impl Storage for Backend {
 
     fn put(
         &self,
-        key: &Oid,
+        key: StorageKey,
         value: LFSObject,
     ) -> StorageFuture<(), Self::Error> {
-        let path = self.key_to_path(key);
+        let path = self.key_to_path(&key);
         let dir = path.parent().unwrap().to_path_buf();
 
         let incomplete = self.root.join("incomplete");
@@ -101,7 +112,10 @@ impl Storage for Backend {
         )
     }
 
-    fn size(&self, key: &Oid) -> StorageFuture<Option<u64>, Self::Error> {
+    fn size(
+        &self,
+        key: &StorageKey,
+    ) -> StorageFuture<Option<u64>, Self::Error> {
         let path = self.key_to_path(key);
 
         Box::new(
@@ -114,7 +128,7 @@ impl Storage for Backend {
         )
     }
 
-    fn delete(&self, key: &Oid) -> StorageFuture<(), Self::Error> {
+    fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error> {
         Box::new(fs::remove_file(self.key_to_path(key)).or_else(move |err| {
             match err.kind() {
                 io::ErrorKind::NotFound => Ok(()),

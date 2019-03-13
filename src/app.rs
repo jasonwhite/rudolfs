@@ -34,7 +34,7 @@ use hyper::{self, service::Service, Chunk, Method, Request, Response};
 use crate::error::Error;
 use crate::hyperext::{into_request, Body, IntoResponse, RequestExt};
 use crate::lfs;
-use crate::storage::{LFSObject, Storage};
+use crate::storage::{LFSObject, Namespace, Storage, StorageKey};
 
 /// Shared state for all instances of the `App` service.
 pub struct State<S> {
@@ -63,13 +63,83 @@ where
         App { state }
     }
 
+    /// Generates a "404 not found" response.
+    fn not_found(
+        &mut self,
+        _req: Request<Body>,
+    ) -> Result<Response<Body>, Error> {
+        Ok(Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body("Not found".into())?)
+    }
+
+    /// Handles `/api` routes.
+    fn api(
+        &mut self,
+        req: Request<Body>,
+    ) -> impl Future<Item = Response<Body>, Error = Error> {
+        let mut parts = req.uri().path().split('/').filter(|s| !s.is_empty());
+
+        // Skip over the '/api' part.
+        assert_eq!(parts.next(), Some("api"));
+
+        // Extract the namespace.
+        let namespace = match (parts.next(), parts.next()) {
+            (Some(org), Some(project)) => {
+                Namespace::new(org.into(), project.into())
+            }
+            _ => {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from("Missing org/project in URL"))
+                    .map_err(Into::into)
+                    .response();
+            }
+        };
+
+        match parts.next() {
+            Some("object") => {
+                // Upload or download a single object.
+                let oid = parts.next().and_then(|x| x.parse::<lfs::Oid>().ok());
+                let oid = match oid {
+                    Some(oid) => oid,
+                    None => {
+                        return Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .body(Body::from("Missing OID parameter."))
+                            .map_err(Into::into)
+                            .response();
+                    }
+                };
+
+                let key = StorageKey::new(oid).with_namespace(namespace);
+
+                match *req.method() {
+                    Method::GET => self.download(req, key).response(),
+                    Method::PUT => self.upload(req, key).response(),
+                    _ => self.not_found(req).response(),
+                }
+            }
+            Some("objects") => match (req.method(), parts.next()) {
+                (&Method::POST, Some("batch")) => {
+                    self.batch(req, namespace).response()
+                }
+                (&Method::POST, Some("verify")) => {
+                    self.verify(req, namespace).response()
+                }
+                _ => self.not_found(req).response(),
+            },
+            _ => self.not_found(req).response(),
+        }
+    }
+
     /// Downloads a single LFS object.
     fn download(
         &mut self,
         _req: Request<Body>,
-        oid: lfs::Oid,
+        key: StorageKey,
     ) -> impl Future<Item = Response<Body>, Error = Error> {
-        self.state.storage.get(&oid).from_err::<Error>().and_then(
+        self.state.storage.get(&key).from_err::<Error>().and_then(
             move |object| -> Result<_, Error> {
                 if let Some(object) = object {
                     return Response::builder()
@@ -95,7 +165,7 @@ where
     fn upload(
         &mut self,
         req: Request<Body>,
-        oid: lfs::Oid,
+        key: StorageKey,
     ) -> <Self as Service>::Future {
         let len = req
             .headers()
@@ -128,7 +198,7 @@ where
         Box::new(
             self.state
                 .storage
-                .put(&oid, object)
+                .put(key, object)
                 .from_err::<Error>()
                 .and_then(|_| {
                     Response::builder()
@@ -143,13 +213,16 @@ where
     fn verify(
         &mut self,
         req: Request<Body>,
+        namespace: Namespace,
     ) -> impl Future<Item = Response<Body>, Error = Error> {
         let state = self.state.clone();
 
         req.into_body()
             .into_json()
             .and_then(move |val: lfs::VerifyRequest| {
-                state.storage.size(&val.oid).from_err::<Error>().and_then(
+                let key = StorageKey::new(val.oid).with_namespace(namespace);
+
+                state.storage.size(&key).from_err::<Error>().and_then(
                     move |size| {
                         if let Some(size) = size {
                             if size == val.size {
@@ -170,16 +243,6 @@ where
             })
     }
 
-    /// Generates a "404 not found" response.
-    fn not_found(
-        &mut self,
-        _req: Request<Body>,
-    ) -> Result<Response<Body>, Error> {
-        Ok(Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body("Not found".into())?)
-    }
-
     /// Batch API endpoint for the Git LFS server spec.
     ///
     /// See also:
@@ -187,6 +250,7 @@ where
     fn batch(
         &mut self,
         req: Request<Body>,
+        namespace: Namespace,
     ) -> impl Future<Item = Response<Body>, Error = Error> {
         // Get the host name and scheme.
         let uri = Uri::builder()
@@ -213,13 +277,16 @@ where
                             val.objects.into_iter().map(move |object| {
                                 let uri = uri.clone();
 
-                                state.storage.size(&object.oid).map(
-                                    move |size| {
-                                        basic_response(
-                                            uri, object, operation, size,
-                                        )
-                                    },
-                                )
+                                let key = StorageKey::new(object.oid)
+                                    .with_namespace(namespace.clone());
+
+                                let namespace = namespace.clone();
+
+                                state.storage.size(&key).map(move |size| {
+                                    basic_response(
+                                        uri, object, operation, size, namespace,
+                                    )
+                                })
                             });
 
                         Either::A(
@@ -268,6 +335,7 @@ fn basic_response(
     object: lfs::RequestObject,
     op: lfs::Operation,
     size: Option<u64>,
+    namespace: Namespace,
 ) -> lfs::ResponseObject {
     if let Some(size) = size {
         // Ensure that the client and server agree on the size of the object.
@@ -288,7 +356,7 @@ fn basic_response(
         }
     }
 
-    let href = format!("{}object/{}", uri, object.oid);
+    let href = format!("{}api/{}/object/{}", uri, namespace, object.oid);
 
     let action = lfs::Action {
         href,
@@ -320,7 +388,10 @@ fn basic_response(
                         download: None,
                         upload: Some(action.clone()),
                         verify: Some(lfs::Action {
-                            href: format!("{}objects/verify", uri),
+                            href: format!(
+                                "{}api/{}/objects/verify",
+                                uri, namespace
+                            ),
                             header: None,
                             expires_in: None,
                             expires_at: None,
@@ -373,51 +444,8 @@ where
     fn call(&mut self, req: Request<Self::ReqBody>) -> Self::Future {
         let req = into_request(req);
 
-        if req.uri().path().starts_with("/object/") {
-            // Extract the OID from the request.
-            let mut parts =
-                req.uri().path().split('/').filter(|s| !s.is_empty());
-
-            // Skip over the 'object/' part.
-            parts.next();
-
-            let oid = match parts.next() {
-                Some(oid) => oid,
-                None => {
-                    return Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .body(Body::from("Missing OID parameter."))
-                        .map_err(Into::into)
-                        .response();
-                }
-            };
-
-            let oid = match oid.parse::<lfs::Oid>() {
-                Ok(oid) => oid,
-                Err(err) => {
-                    return Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .body(Body::from(format!("Invalid OID: {}", err)))
-                        .map_err(Into::into)
-                        .response();
-                }
-            };
-
-            match *req.method() {
-                Method::GET => return self.download(req, oid).response(),
-                Method::PUT => return self.upload(req, oid),
-                _ => return self.not_found(req).response(),
-            }
-        }
-
-        match (req.method(), req.uri().path()) {
-            (&Method::POST, "/objects/batch") => {
-                return self.batch(req).response();
-            }
-            (&Method::POST, "/objects/verify") => {
-                return self.verify(req).response();
-            }
-            _ => {}
+        if req.uri().path().starts_with("/api/") {
+            return self.api(req).response();
         }
 
         Response::builder()

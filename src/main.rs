@@ -61,6 +61,10 @@ struct Args {
     #[structopt(long = "s3-bucket")]
     s3_bucket: String,
 
+    /// Amazon S3 path prefix to use.
+    #[structopt(long = "s3-prefix", default_value = "lfs")]
+    s3_prefix: String,
+
     /// Encryption key to use.
     #[structopt(long = "key", parse(try_from_str = "FromHex::from_hex"))]
     key: [u8; 32],
@@ -94,7 +98,7 @@ impl Args {
 
         // Initialize our storage backends.
         let disk = Disk::new(self.cache_dir).map_err(Error::from);
-        let s3 = S3::new(self.s3_bucket, "lfs".into()).map_err(Error::from);
+        let s3 = S3::new(self.s3_bucket, self.s3_prefix).map_err(Error::from);
         let storage = disk
             .join(s3)
             .and_then(move |(disk, s3)| {

@@ -28,7 +28,7 @@ use rusoto_s3::{
     S3Client, StreamingBody, S3,
 };
 
-use super::{LFSObject, Storage, StorageFuture, StorageStream};
+use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
 
 use crate::lfs::Oid;
 
@@ -91,8 +91,15 @@ pub struct Backend<C = S3Client> {
 impl Backend {
     pub fn new(
         bucket: String,
-        prefix: String,
+        mut prefix: String,
     ) -> impl Future<Item = Self, Error = Error> {
+        // Ensure the prefix doesn't end with a '/'.
+        while prefix.ends_with('/') {
+            prefix.pop();
+        }
+
+        // `Region::default` will get try to get the region from the environment
+        // and fallback to a default if it isn't found.
         Backend::with_client(S3Client::new(Region::default()), bucket, prefix)
     }
 }
@@ -124,8 +131,12 @@ where
             })
     }
 
-    fn key_to_path(&self, oid: &Oid) -> String {
-        format!("{}/{}", self.prefix, oid.path())
+    fn key_to_path(&self, key: &StorageKey) -> String {
+        if let Some(namespace) = key.namespace() {
+            format!("{}/{}/{}", self.prefix, namespace, key.oid().path())
+        } else {
+            format!("{}/{}", self.prefix, key.oid().path())
+        }
     }
 }
 
@@ -135,7 +146,10 @@ where
 {
     type Error = Error;
 
-    fn get(&self, key: &Oid) -> StorageFuture<Option<LFSObject>, Self::Error> {
+    fn get(
+        &self,
+        key: &StorageKey,
+    ) -> StorageFuture<Option<LFSObject>, Self::Error> {
         let request = GetObjectRequest {
             bucket: self.bucket.clone(),
             key: self.key_to_path(key),
@@ -165,12 +179,9 @@ where
 
     fn put(
         &self,
-        key: &Oid,
+        key: StorageKey,
         value: LFSObject,
     ) -> StorageFuture<(), Self::Error> {
-        // TODO:
-        //  * Put an upper limit on the amount of data that can be uploaded.
-        //  * Encrypt the data with a private key(?)
         let (len, stream) = value.into_parts();
 
         let stream = stream.map(|chunk| {
@@ -182,7 +193,7 @@ where
 
         let request = PutObjectRequest {
             bucket: self.bucket.clone(),
-            key: self.key_to_path(key),
+            key: self.key_to_path(&key),
             content_length: Some(len as i64),
             body: Some(StreamingBody::new(stream)),
             ..Default::default()
@@ -191,7 +202,10 @@ where
         Box::new(self.client.put_object(request).map(|_| ()).from_err())
     }
 
-    fn size(&self, key: &Oid) -> StorageFuture<Option<u64>, Self::Error> {
+    fn size(
+        &self,
+        key: &StorageKey,
+    ) -> StorageFuture<Option<u64>, Self::Error> {
         let request = HeadObjectRequest {
             bucket: self.bucket.clone(),
             key: self.key_to_path(key),
@@ -228,8 +242,9 @@ where
         )
     }
 
-    /// This never deletes objects from S3 and always returns success.
-    fn delete(&self, _key: &Oid) -> StorageFuture<(), Self::Error> {
+    /// This never deletes objects from S3 and always returns success. This may
+    /// be changed in the future.
+    fn delete(&self, _key: &StorageKey) -> StorageFuture<(), Self::Error> {
         Box::new(future::ok(()))
     }
 

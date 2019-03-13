@@ -15,6 +15,10 @@ A high-performance, caching Git LFS server with an AWS S3 back-end.
 
  - Encryption of LFS objects in both the cache and in permanent storage.
 
+ - Separation of GitHub organizations and projects. Just specify the org and
+   project names in the URL and they are automatically created. If two projects
+   share many LFS objects, have them use the same URL to save on storage space.
+
 ## Running It
 
 ### Generate an encryption key
@@ -118,7 +122,7 @@ Add `.lfsconfig` to the root of your Git repository:
 
 ```
 [lfs]
-url = "http://gitlfs.example.com:8080/"
+url = "http://gitlfs.example.com:8080/api/my-org/my-project"
 ```
 
 Optionally, I also recommend changing these global settings to speed things up:

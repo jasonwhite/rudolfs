@@ -29,7 +29,7 @@ use tokio;
 use crate::lfs::Oid;
 use crate::lru::Cache;
 
-use super::{LFSObject, Storage, StorageFuture, StorageStream};
+use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
 
 #[derive(Debug)]
 pub enum Error<C, S> {
@@ -113,9 +113,6 @@ where
 
 /// Returns a future that prunes the least recently used entries that cause the
 /// storage to exceed the given maximum size.
-///
-/// If the stream is thrown away, then the items will be removed from the
-/// in-memory LRU cache, but not physically deleted.
 fn prune_cache<S>(
     lru: &mut Cache,
     max_size: u64,
@@ -138,13 +135,14 @@ where
     }
 
     Either::B(stream::iter_ok(to_delete).fold(0, move |acc, oid| {
-        storage.delete(&oid).map(move |()| acc + 1)
+        let key = StorageKey::new(oid);
+        storage.delete(&key).map(move |()| acc + 1)
     }))
 }
 
 fn cache_and_prune<C>(
     cache: Arc<C>,
-    key: Oid,
+    oid: Oid,
     obj: LFSObject,
     lru: Arc<Mutex<Cache>>,
     max_size: u64,
@@ -155,12 +153,12 @@ where
     let len = obj.len();
 
     cache
-        .put(&key, obj)
+        .put(StorageKey::new(oid), obj)
         .and_then(move |()| {
             // Add the object info to our LRU cache once the download from
             // permanent storage is complete.
             let mut lru = lru.lock().unwrap();
-            lru.push(key, len);
+            lru.push(oid, len);
 
             // Prune the cache.
             prune_cache(&mut lru, max_size, cache).map(move |count| {
@@ -170,7 +168,7 @@ where
             })
         })
         .map_err(move |err| {
-            log::error!("Error caching {} ({})", key, err);
+            log::error!("Error caching {} ({})", oid, err);
         })
 }
 
@@ -185,20 +183,20 @@ where
 
     /// Tries to query the cache first. If that fails, falls back to the
     /// permanent storage backend.
-    fn get(&self, key: &Oid) -> StorageFuture<Option<LFSObject>, Self::Error> {
+    fn get(
+        &self,
+        key: &StorageKey,
+    ) -> StorageFuture<Option<LFSObject>, Self::Error> {
         // TODO: Keep stats on cache hits and misses. We can then display those
         // stats on a web page or send them to another service such as
         // Prometheus.
-        let key = *key;
-
         if let Ok(mut lru) = self.lru.lock() {
-            if lru.get_refresh(&key).is_some() {
+            if lru.get_refresh(key.oid()).is_some() {
                 // Cache hit!
-                //
-                // TODO: Verify the stream as we send it back. If the SHA256 is
-                // incorrect, delete it and let the client try again.
                 let storage = self.storage.clone();
                 let lru2 = self.lru.clone();
+
+                let key = StorageKey::new(*key.oid());
 
                 return Box::new(
                     self.cache.get(&key).map_err(Error::from_cache).and_then(
@@ -209,7 +207,7 @@ where
                                 // the entry from our LRU. This can happen if
                                 // the cache is cleared out manually.
                                 let mut lru = lru2.lock().unwrap();
-                                lru.remove(&key);
+                                lru.remove(key.oid());
 
                                 // Fall back to permanent storage. Note that
                                 // this won't actually cache the object. This
@@ -232,6 +230,7 @@ where
         let lru = self.lru.clone();
         let max_size = self.max_size;
         let cache = self.cache.clone();
+        let oid = *key.oid();
 
         Box::new(
             self.storage
@@ -248,7 +247,7 @@ where
                         // out of disk space, the server should still continue
                         // operating.
                         tokio::spawn(cache_and_prune(
-                            cache, key, b, lru, max_size,
+                            cache, oid, b, lru, max_size,
                         ));
 
                         // Send the object from permanent-storage.
@@ -268,10 +267,9 @@ where
 
     fn put(
         &self,
-        key: &Oid,
+        key: StorageKey,
         value: LFSObject,
     ) -> StorageFuture<(), Self::Error> {
-        let key = *key;
         let lru = self.lru.clone();
         let max_size = self.max_size;
         let cache = self.cache.clone();
@@ -282,16 +280,19 @@ where
         // shouldn't prevent the client from uploading the LFS object to
         // permanent storage. For example, even if we run out of disk space, the
         // server should still continue operating.
-        tokio::spawn(cache_and_prune(cache, key, b, lru, max_size));
+        tokio::spawn(cache_and_prune(cache, *key.oid(), b, lru, max_size));
 
-        Box::new(self.storage.put(&key, a).map_err(Error::from_storage))
+        Box::new(self.storage.put(key, a).map_err(Error::from_storage))
     }
 
-    fn size(&self, key: &Oid) -> StorageFuture<Option<u64>, Self::Error> {
+    fn size(
+        &self,
+        key: &StorageKey,
+    ) -> StorageFuture<Option<u64>, Self::Error> {
         // Get just the size of an object without perturbing the LRU ordering.
         // Only downloads or uploads need to perturb the LRU ordering.
         let lru = self.lru.lock().unwrap();
-        if let Some(size) = lru.get(key) {
+        if let Some(size) = lru.get(key.oid()) {
             // Cache hit!
             Box::new(future::ok(Some(size)))
         } else {
@@ -301,15 +302,16 @@ where
     }
 
     /// Deletes an item from the cache (not from permanent storage).
-    fn delete(&self, key: &Oid) -> StorageFuture<(), Self::Error> {
+    fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error> {
         // Only ever delete items from the cache. This may be called when
         // a corrupted object is detected.
-        Box::new(self.cache.delete(key).map_err(Error::from_cache))
+        let key = StorageKey::new(*key.oid());
+        Box::new(self.cache.delete(&key).map_err(Error::from_cache))
     }
 
     /// Returns a stream of cached items.
     fn list(&self) -> StorageStream<(Oid, u64), Self::Error> {
-        // TODO: Use the internal linked hash map instead to get this list.
+        // TODO: Use the LRU instead to get this list.
         Box::new(self.cache.list().map_err(Error::from_cache))
     }
 

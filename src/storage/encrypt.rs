@@ -25,7 +25,7 @@ use futures::{Future, Stream};
 
 use crate::lfs::Oid;
 
-use super::{LFSObject, Storage, StorageFuture, StorageStream};
+use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
 
 /// A storage adaptor that encrypts/decrypts all data that passes through.
 pub struct Backend<S> {
@@ -67,10 +67,13 @@ where
 {
     type Error = S::Error;
 
-    fn get(&self, key: &Oid) -> StorageFuture<Option<LFSObject>, Self::Error> {
+    fn get(
+        &self,
+        key: &StorageKey,
+    ) -> StorageFuture<Option<LFSObject>, Self::Error> {
         // Use the first part of the SHA256 as the nonce.
         let mut nonce: [u8; 24] = [0; 24];
-        nonce.copy_from_slice(&key.bytes()[0..24]);
+        nonce.copy_from_slice(&key.oid().bytes()[0..24]);
 
         let chacha = ChaCha::new_xchacha20(&self.key, &nonce);
 
@@ -88,12 +91,12 @@ where
 
     fn put(
         &self,
-        key: &Oid,
+        key: StorageKey,
         value: LFSObject,
     ) -> StorageFuture<(), Self::Error> {
         // Use the first part of the SHA256 as the nonce.
         let mut nonce: [u8; 24] = [0; 24];
-        nonce.copy_from_slice(&key.bytes()[0..24]);
+        nonce.copy_from_slice(&key.oid().bytes()[0..24]);
 
         let chacha = ChaCha::new_xchacha20(&self.key, &nonce);
 
@@ -103,11 +106,14 @@ where
         self.storage.put(key, LFSObject::new(len, Box::new(stream)))
     }
 
-    fn size(&self, key: &Oid) -> StorageFuture<Option<u64>, Self::Error> {
+    fn size(
+        &self,
+        key: &StorageKey,
+    ) -> StorageFuture<Option<u64>, Self::Error> {
         self.storage.size(key)
     }
 
-    fn delete(&self, key: &Oid) -> StorageFuture<(), Self::Error> {
+    fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error> {
         self.storage.delete(key)
     }
 

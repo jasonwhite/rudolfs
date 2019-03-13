@@ -48,6 +48,78 @@ pub type StorageStream<T, E> = Box<dyn Stream<Item = T, Error = E> + Send>;
 /// The byte stream of an LFS object.
 pub type ByteStream = Box<dyn Stream<Item = Bytes, Error = io::Error> + Send>;
 
+/// A namespace is used to categorize stored LFS objects. The storage
+/// implementation is free to ignore this. However, it can be useful when
+/// pruning old LFS objects from permanent storage.
+#[derive(Clone)]
+pub struct Namespace {
+    org: String,
+    project: String,
+}
+
+impl Namespace {
+    pub fn new(org: String, project: String) -> Self {
+        Namespace { org, project }
+    }
+
+    #[allow(unused)]
+    pub fn split(self) -> (String, String) {
+        (self.org, self.project)
+    }
+
+    pub fn org(&self) -> &str {
+        &self.org
+    }
+
+    pub fn project(&self) -> &str {
+        &self.project
+    }
+}
+
+impl fmt::Display for Namespace {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}/{}", self.org(), self.project())
+    }
+}
+
+/// A key into storage.
+#[derive(Clone)]
+pub struct StorageKey {
+    /// The object ID.
+    oid: Oid,
+
+    /// The namespace is optional. Storage backends that act as a cache may not
+    /// want to use this.
+    namespace: Option<Namespace>,
+}
+
+impl StorageKey {
+    pub fn new(oid: Oid) -> Self {
+        StorageKey {
+            oid,
+            namespace: None,
+        }
+    }
+
+    pub fn with_namespace(mut self, namespace: Namespace) -> Self {
+        self.namespace = Some(namespace);
+        self
+    }
+
+    #[allow(unused)]
+    pub fn into_parts(self) -> (Oid, Option<Namespace>) {
+        (self.oid, self.namespace)
+    }
+
+    pub fn oid(&self) -> &Oid {
+        &self.oid
+    }
+
+    pub fn namespace(&self) -> &Option<Namespace> {
+        &self.namespace
+    }
+}
+
 /// An LFS object to be uploaded or downloaded.
 pub struct LFSObject {
     /// Size of the object.
@@ -117,24 +189,28 @@ pub trait Storage {
     type Error: fmt::Display + Send;
 
     /// Gets an entry from the storage medium.
-    fn get(&self, key: &Oid) -> StorageFuture<Option<LFSObject>, Self::Error>;
+    fn get(
+        &self,
+        key: &StorageKey,
+    ) -> StorageFuture<Option<LFSObject>, Self::Error>;
 
     /// Sets an entry in the storage medium.
     fn put(
         &self,
-        key: &Oid,
+        key: StorageKey,
         value: LFSObject,
     ) -> StorageFuture<(), Self::Error>;
 
     /// Gets the size of the object. Returns `None` if the object does not
     /// exist.
-    fn size(&self, key: &Oid) -> StorageFuture<Option<u64>, Self::Error>;
+    fn size(&self, key: &StorageKey)
+        -> StorageFuture<Option<u64>, Self::Error>;
 
     /// Deletes an object.
     ///
     /// Permanent storage backends may choose to never delete objects, always
     /// returning success.
-    fn delete(&self, key: &Oid) -> StorageFuture<(), Self::Error>;
+    fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error>;
 
     /// Returns a stream of all the object IDs in the storage medium.
     fn list(&self) -> StorageStream<(Oid, u64), Self::Error>;
@@ -159,23 +235,29 @@ where
 {
     type Error = S::Error;
 
-    fn get(&self, key: &Oid) -> StorageFuture<Option<LFSObject>, Self::Error> {
+    fn get(
+        &self,
+        key: &StorageKey,
+    ) -> StorageFuture<Option<LFSObject>, Self::Error> {
         (**self).get(key)
     }
 
     fn put(
         &self,
-        key: &Oid,
+        key: StorageKey,
         value: LFSObject,
     ) -> StorageFuture<(), Self::Error> {
         (**self).put(key, value)
     }
 
-    fn size(&self, key: &Oid) -> StorageFuture<Option<u64>, Self::Error> {
+    fn size(
+        &self,
+        key: &StorageKey,
+    ) -> StorageFuture<Option<u64>, Self::Error> {
         (**self).size(key)
     }
 
-    fn delete(&self, key: &Oid) -> StorageFuture<(), Self::Error> {
+    fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error> {
         (**self).delete(key)
     }
 

@@ -29,7 +29,7 @@ use futures::{
 use crate::lfs::Oid;
 use crate::sha256::{Sha256VerifyError, VerifyStream};
 
-use super::{LFSObject, Storage, StorageFuture, StorageStream};
+use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
 
 #[derive(Debug, Display, From)]
 enum Error {
@@ -73,8 +73,11 @@ where
     /// from storage if it is corrupted. If storage backends are composed
     /// correctly, then it should only delete cache storage (not permanent
     /// storage).
-    fn get(&self, key: &Oid) -> StorageFuture<Option<LFSObject>, Self::Error> {
-        let key = *key;
+    fn get(
+        &self,
+        key: &StorageKey,
+    ) -> StorageFuture<Option<LFSObject>, Self::Error> {
+        let key = key.clone();
 
         let storage = self.storage.clone();
 
@@ -82,25 +85,28 @@ where
             Some(obj) => {
                 let (len, stream) = obj.into_parts();
 
-                let stream =
-                    VerifyStream::new(stream.map_err(Error::from), len, key)
-                        .or_else(move |err| match err {
-                            Error::Verify(err) => {
-                                log::error!(
-                                    "Deleting corrupted object {} ({})",
-                                    key,
-                                    err
-                                );
+                let stream = VerifyStream::new(
+                    stream.map_err(Error::from),
+                    len,
+                    *key.oid(),
+                )
+                .or_else(move |err| match err {
+                    Error::Verify(err) => {
+                        log::error!(
+                            "Deleting corrupted object {} ({})",
+                            key.oid(),
+                            err
+                        );
 
-                                Either::A(storage.delete(&key).then(|_| {
-                                    Err(io::Error::new(
-                                        io::ErrorKind::Other,
-                                        "found corrupted object",
-                                    ))
-                                }))
-                            }
-                            Error::Io(err) => Either::B(future::err(err)),
-                        });
+                        Either::A(storage.delete(&key).then(|_| {
+                            Err(io::Error::new(
+                                io::ErrorKind::Other,
+                                "found corrupted object",
+                            ))
+                        }))
+                    }
+                    Error::Io(err) => Either::B(future::err(err)),
+                });
 
                 Some(LFSObject::new(len, Box::new(stream)))
             }
@@ -110,25 +116,31 @@ where
 
     fn put(
         &self,
-        key: &Oid,
+        key: StorageKey,
         value: LFSObject,
     ) -> StorageFuture<(), Self::Error> {
         let (len, stream) = value.into_parts();
 
-        let stream = VerifyStream::new(stream.map_err(Error::from), len, *key)
-            .map_err(move |err| match err {
-                Error::Verify(err) => io::Error::new(io::ErrorKind::Other, err),
-                Error::Io(err) => io::Error::new(io::ErrorKind::Other, err),
-            });
+        let stream =
+            VerifyStream::new(stream.map_err(Error::from), len, *key.oid())
+                .map_err(move |err| match err {
+                    Error::Verify(err) => {
+                        io::Error::new(io::ErrorKind::Other, err)
+                    }
+                    Error::Io(err) => io::Error::new(io::ErrorKind::Other, err),
+                });
 
         self.storage.put(key, LFSObject::new(len, Box::new(stream)))
     }
 
-    fn size(&self, key: &Oid) -> StorageFuture<Option<u64>, Self::Error> {
+    fn size(
+        &self,
+        key: &StorageKey,
+    ) -> StorageFuture<Option<u64>, Self::Error> {
         self.storage.size(key)
     }
 
-    fn delete(&self, key: &Oid) -> StorageFuture<(), Self::Error> {
+    fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error> {
         self.storage.delete(key)
     }
 
