@@ -45,7 +45,7 @@ publish_task:
   cargo_cache:
     folder: $CARGO_HOME/registry
     fingerprint_script: cat Cargo.lock
-  publish_script: cargo publish --token "$CARGO_TOKEN"
+  publish_script: cargo publish --no-verify --token "$CARGO_TOKEN"
 
 # Build releases
 tag_docker_builder:
