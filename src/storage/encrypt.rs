@@ -23,8 +23,6 @@ use std::io;
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 
-use crate::lfs::Oid;
-
 use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
 
 /// A storage adaptor that encrypts/decrypts all data that passes through.
@@ -117,7 +115,7 @@ where
         self.storage.delete(key)
     }
 
-    fn list(&self) -> StorageStream<(Oid, u64), Self::Error> {
+    fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
         self.storage.list()
     }
 

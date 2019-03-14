@@ -112,7 +112,7 @@ where
                     }
                 };
 
-                let key = StorageKey::new(oid).with_namespace(namespace);
+                let key = StorageKey::new(namespace, oid);
 
                 match *req.method() {
                     Method::GET => self.download(req, key).response(),
@@ -220,7 +220,7 @@ where
         req.into_body()
             .into_json()
             .and_then(move |val: lfs::VerifyRequest| {
-                let key = StorageKey::new(val.oid).with_namespace(namespace);
+                let key = StorageKey::new(namespace, val.oid);
 
                 state.storage.size(&key).from_err::<Error>().and_then(
                     move |size| {
@@ -277,12 +277,13 @@ where
                             val.objects.into_iter().map(move |object| {
                                 let uri = uri.clone();
 
-                                let key = StorageKey::new(object.oid)
-                                    .with_namespace(namespace.clone());
-
-                                let namespace = namespace.clone();
+                                let key = StorageKey::new(
+                                    namespace.clone(),
+                                    object.oid,
+                                );
 
                                 state.storage.size(&key).map(move |size| {
+                                    let (namespace, _) = key.into_parts();
                                     basic_response(
                                         uri, object, operation, size, namespace,
                                     )

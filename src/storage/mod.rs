@@ -51,7 +51,7 @@ pub type ByteStream = Box<dyn Stream<Item = Bytes, Error = io::Error> + Send>;
 /// A namespace is used to categorize stored LFS objects. The storage
 /// implementation is free to ignore this. However, it can be useful when
 /// pruning old LFS objects from permanent storage.
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Namespace {
     org: String,
     project: String,
@@ -59,6 +59,7 @@ pub struct Namespace {
 
 impl Namespace {
     pub fn new(org: String, project: String) -> Self {
+        // TODO: Ensure that the strings do not contain any illegal paths.
         Namespace { org, project }
     }
 
@@ -83,40 +84,33 @@ impl fmt::Display for Namespace {
 }
 
 /// A key into storage.
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct StorageKey {
-    /// The object ID.
+    namespace: Namespace,
     oid: Oid,
-
-    /// The namespace is optional. Storage backends that act as a cache may not
-    /// want to use this.
-    namespace: Option<Namespace>,
 }
 
 impl StorageKey {
-    pub fn new(oid: Oid) -> Self {
-        StorageKey {
-            oid,
-            namespace: None,
-        }
+    pub fn new(namespace: Namespace, oid: Oid) -> Self {
+        StorageKey { oid, namespace }
     }
 
-    pub fn with_namespace(mut self, namespace: Namespace) -> Self {
-        self.namespace = Some(namespace);
-        self
-    }
-
-    #[allow(unused)]
-    pub fn into_parts(self) -> (Oid, Option<Namespace>) {
-        (self.oid, self.namespace)
+    pub fn into_parts(self) -> (Namespace, Oid) {
+        (self.namespace, self.oid)
     }
 
     pub fn oid(&self) -> &Oid {
         &self.oid
     }
 
-    pub fn namespace(&self) -> &Option<Namespace> {
+    pub fn namespace(&self) -> &Namespace {
         &self.namespace
+    }
+}
+
+impl fmt::Display for StorageKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}/{}", self.namespace, self.oid)
     }
 }
 
@@ -213,7 +207,7 @@ pub trait Storage {
     fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error>;
 
     /// Returns a stream of all the object IDs in the storage medium.
-    fn list(&self) -> StorageStream<(Oid, u64), Self::Error>;
+    fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error>;
 
     /// Gets the total size of the storage, if known.
     fn total_size(&self) -> Option<u64> {
@@ -261,7 +255,7 @@ where
         (**self).delete(key)
     }
 
-    fn list(&self) -> StorageStream<(Oid, u64), Self::Error> {
+    fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
         (**self).list()
     }
 

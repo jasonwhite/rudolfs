@@ -26,7 +26,6 @@ use futures::{
     Future, Stream,
 };
 
-use crate::lfs::Oid;
 use crate::sha256::{Sha256VerifyError, VerifyStream};
 
 use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
@@ -144,7 +143,7 @@ where
         self.storage.delete(key)
     }
 
-    fn list(&self) -> StorageStream<(Oid, u64), Self::Error> {
+    fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
         self.storage.list()
     }
 

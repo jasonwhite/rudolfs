@@ -30,8 +30,6 @@ use rusoto_s3::{
 
 use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
 
-use crate::lfs::Oid;
-
 #[derive(Debug, From, Display)]
 pub enum Error {
     GetObjectError(GetObjectError),
@@ -132,11 +130,7 @@ where
     }
 
     fn key_to_path(&self, key: &StorageKey) -> String {
-        if let Some(namespace) = key.namespace() {
-            format!("{}/{}/{}", self.prefix, namespace, key.oid().path())
-        } else {
-            format!("{}/{}", self.prefix, key.oid().path())
-        }
+        format!("{}/{}/{}", self.prefix, key.namespace(), key.oid().path())
     }
 }
 
@@ -249,7 +243,7 @@ where
     }
 
     /// Always returns an empty stream. This may be changed in the future.
-    fn list(&self) -> StorageStream<(Oid, u64), Self::Error> {
+    fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
         Box::new(stream::empty())
     }
 }

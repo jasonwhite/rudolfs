@@ -17,15 +17,15 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+use std::hash::Hash;
+
 use futures::{Future, Stream};
 use linked_hash_map::LinkedHashMap;
 
-use crate::lfs::Oid;
-
 /// A least recently used (LRU) cache.
-pub struct Cache {
+pub struct Cache<K> {
     // A linked hash map is used to implement an efficient LRU cache.
-    map: LinkedHashMap<Oid, u64>,
+    map: LinkedHashMap<K, u64>,
 
     // Total size of the cache. This is equal to the sum of the values in the
     // map. We use this to determine if the cache has grown too large and must
@@ -33,7 +33,10 @@ pub struct Cache {
     size: u64,
 }
 
-impl Cache {
+impl<K> Cache<K>
+where
+    K: Eq + Hash,
+{
     /// Creates a new, empty cache.
     pub fn new() -> Self {
         Cache {
@@ -55,7 +58,7 @@ impl Cache {
         stream: S,
     ) -> impl Future<Item = Self, Error = S::Error>
     where
-        S: Stream<Item = (Oid, u64)>,
+        S: Stream<Item = (K, u64)>,
     {
         stream
             .fold(Cache::new(), move |mut cache, (oid, len)| {
@@ -68,7 +71,7 @@ impl Cache {
     /// Removes the least recently used item. Returns `None` if the cache is
     /// empty. When the cache gets too large, this should be called in a loop in
     /// order to bring it below the threshold.
-    pub fn pop(&mut self) -> Option<(Oid, u64)> {
+    pub fn pop(&mut self) -> Option<(K, u64)> {
         if let Some((k, v)) = self.map.pop_front() {
             self.size -= v;
             Some((k, v))
@@ -79,7 +82,7 @@ impl Cache {
 
     /// Removes an entry from the cache. Returns the size of the object if it
     /// exists, or `None` if it didn't exist in the cache.
-    pub fn remove(&mut self, key: &Oid) -> Option<u64> {
+    pub fn remove(&mut self, key: &K) -> Option<u64> {
         self.map.remove(key).map(|size| {
             self.size -= size;
             size
@@ -87,13 +90,13 @@ impl Cache {
     }
 
     /// Gets an entry by key without perturbing the LRU ordering.
-    pub fn get(&self, key: &Oid) -> Option<u64> {
+    pub fn get(&self, key: &K) -> Option<u64> {
         self.map.get(key).cloned()
     }
 
     /// Gets an entry by key. If the entry exists, it will be touched so that it
     /// becomes the most recently used item.
-    pub fn get_refresh(&mut self, key: &Oid) -> Option<u64> {
+    pub fn get_refresh(&mut self, key: &K) -> Option<u64> {
         self.map.get_refresh(key).cloned()
     }
 
@@ -101,7 +104,7 @@ impl Cache {
     /// cache item if it already existed. Returns `None` if the entry did not
     /// previously exist. In either case, the entry is always touched so that it
     /// becomes the most recently used item.
-    pub fn push(&mut self, key: Oid, value: u64) -> Option<u64> {
+    pub fn push(&mut self, key: K, value: u64) -> Option<u64> {
         self.size += value;
 
         if let Some(old_value) = self.map.insert(key, value) {

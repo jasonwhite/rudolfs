@@ -26,10 +26,11 @@ use futures::{
 };
 use tokio;
 
-use crate::lfs::Oid;
-use crate::lru::Cache;
+use crate::lru;
 
 use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
+
+type Cache = lru::Cache<StorageKey>;
 
 #[derive(Debug)]
 pub enum Error<C, S> {
@@ -129,20 +130,19 @@ where
     let mut to_delete = Vec::new();
 
     while lru.size() > max_size {
-        if let Some((oid, _)) = lru.pop() {
-            to_delete.push(oid);
+        if let Some((key, _)) = lru.pop() {
+            to_delete.push(key);
         }
     }
 
-    Either::B(stream::iter_ok(to_delete).fold(0, move |acc, oid| {
-        let key = StorageKey::new(oid);
+    Either::B(stream::iter_ok(to_delete).fold(0, move |acc, key| {
         storage.delete(&key).map(move |()| acc + 1)
     }))
 }
 
 fn cache_and_prune<C>(
     cache: Arc<C>,
-    oid: Oid,
+    key: StorageKey,
     obj: LFSObject,
     lru: Arc<Mutex<Cache>>,
     max_size: u64,
@@ -152,15 +152,16 @@ where
 {
     let len = obj.len();
 
+    let oid = *key.oid();
+
     cache
-        .put(StorageKey::new(oid), obj)
+        .put(key.clone(), obj)
         .and_then(move |()| {
             // Add the object info to our LRU cache once the download from
             // permanent storage is complete.
             let mut lru = lru.lock().unwrap();
-            lru.push(oid, len);
+            lru.push(key, len);
 
-            // Prune the cache.
             prune_cache(&mut lru, max_size, cache).map(move |count| {
                 if count > 0 {
                     log::info!("Pruned {} entries from the cache", count);
@@ -191,12 +192,12 @@ where
         // stats on a web page or send them to another service such as
         // Prometheus.
         if let Ok(mut lru) = self.lru.lock() {
-            if lru.get_refresh(key.oid()).is_some() {
+            if lru.get_refresh(key).is_some() {
                 // Cache hit!
                 let storage = self.storage.clone();
                 let lru2 = self.lru.clone();
 
-                let key = StorageKey::new(*key.oid());
+                let key = key.clone();
 
                 return Box::new(
                     self.cache.get(&key).map_err(Error::from_cache).and_then(
@@ -207,7 +208,7 @@ where
                                 // the entry from our LRU. This can happen if
                                 // the cache is cleared out manually.
                                 let mut lru = lru2.lock().unwrap();
-                                lru.remove(key.oid());
+                                lru.remove(&key);
 
                                 // Fall back to permanent storage. Note that
                                 // this won't actually cache the object. This
@@ -230,7 +231,7 @@ where
         let lru = self.lru.clone();
         let max_size = self.max_size;
         let cache = self.cache.clone();
-        let oid = *key.oid();
+        let key = key.clone();
 
         Box::new(
             self.storage
@@ -247,7 +248,7 @@ where
                         // out of disk space, the server should still continue
                         // operating.
                         tokio::spawn(cache_and_prune(
-                            cache, oid, b, lru, max_size,
+                            cache, key, b, lru, max_size,
                         ));
 
                         // Send the object from permanent-storage.
@@ -280,7 +281,7 @@ where
         // shouldn't prevent the client from uploading the LFS object to
         // permanent storage. For example, even if we run out of disk space, the
         // server should still continue operating.
-        tokio::spawn(cache_and_prune(cache, *key.oid(), b, lru, max_size));
+        tokio::spawn(cache_and_prune(cache, key.clone(), b, lru, max_size));
 
         Box::new(self.storage.put(key, a).map_err(Error::from_storage))
     }
@@ -292,7 +293,7 @@ where
         // Get just the size of an object without perturbing the LRU ordering.
         // Only downloads or uploads need to perturb the LRU ordering.
         let lru = self.lru.lock().unwrap();
-        if let Some(size) = lru.get(key.oid()) {
+        if let Some(size) = lru.get(key) {
             // Cache hit!
             Box::new(future::ok(Some(size)))
         } else {
@@ -305,12 +306,11 @@ where
     fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error> {
         // Only ever delete items from the cache. This may be called when
         // a corrupted object is detected.
-        let key = StorageKey::new(*key.oid());
-        Box::new(self.cache.delete(&key).map_err(Error::from_cache))
+        Box::new(self.cache.delete(key).map_err(Error::from_cache))
     }
 
     /// Returns a stream of cached items.
-    fn list(&self) -> StorageStream<(Oid, u64), Self::Error> {
+    fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
         // TODO: Use the LRU instead to get this list.
         Box::new(self.cache.list().map_err(Error::from_cache))
     }

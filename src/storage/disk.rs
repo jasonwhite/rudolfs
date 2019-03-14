@@ -31,7 +31,9 @@ use tokio::{
 };
 use uuid::Uuid;
 
-use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
+use super::{
+    LFSObject, Namespace, Storage, StorageFuture, StorageKey, StorageStream,
+};
 use crate::lfs::Oid;
 
 pub struct Backend {
@@ -47,15 +49,11 @@ impl Backend {
     // Use sub directories in order to better utilize the file system's internal
     // tree data structure.
     fn key_to_path(&self, key: &StorageKey) -> PathBuf {
-        if let Some(namespace) = key.namespace() {
-            self.root.join(format!(
-                "objects/{}/{}",
-                namespace,
-                key.oid().path()
-            ))
-        } else {
-            self.root.join(format!("objects/{}", key.oid().path()))
-        }
+        self.root.join(format!(
+            "objects/{}/{}",
+            key.namespace(),
+            key.oid().path()
+        ))
     }
 }
 
@@ -129,6 +127,9 @@ impl Storage for Backend {
     }
 
     fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error> {
+        // TODO: Attempt to delete the parent folder(s)? This would keep the
+        // directory tree clean but it could also cause a race condition when
+        // directories are created during `put` operations.
         Box::new(fs::remove_file(self.key_to_path(key)).or_else(move |err| {
             match err.kind() {
                 io::ErrorKind::NotFound => Ok(()),
@@ -156,12 +157,16 @@ impl Storage for Backend {
     ///
     /// Note that the first four characters are repeated in the file name so
     /// that transforming the file name into an object ID is simpler.
-    fn list(&self) -> StorageStream<(Oid, u64), Self::Error> {
+    fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
         let path = self.root.join("objects");
 
         Box::new(
             fs::read_dir(path)
                 .flatten_stream()
+                .map(move |entry| fs::read_dir(entry.path()).flatten_stream())
+                .flatten()
+                .map(move |entry| fs::read_dir(entry.path()).flatten_stream())
+                .flatten()
                 .map(move |entry| fs::read_dir(entry.path()).flatten_stream())
                 .flatten()
                 .map(move |entry| fs::read_dir(entry.path()).flatten_stream())
@@ -172,16 +177,22 @@ impl Storage for Backend {
                         .map(move |metadata| (path, metadata))
                 })
                 .filter_map(move |(path, metadata)| {
-                    if let Some(oid) = path
+                    // Extract the org and project names from the top two path
+                    // components.
+                    let project_path = path.parent()?.parent()?.parent()?;
+
+                    let project = project_path.file_name()?.to_str()?;
+                    let org = project_path.parent()?.file_name()?.to_str()?;
+
+                    let namespace = Namespace::new(org.into(), project.into());
+
+                    let oid = path
                         .file_name()
                         .and_then(OsStr::to_str)
-                        .and_then(|s| Oid::from_str(s).ok())
-                    {
-                        if metadata.is_file() {
-                            Some((oid, metadata.len()))
-                        } else {
-                            None
-                        }
+                        .and_then(|s| Oid::from_str(s).ok())?;
+
+                    if metadata.is_file() {
+                        Some((StorageKey::new(namespace, oid), metadata.len()))
                     } else {
                         None
                     }
