@@ -37,11 +37,11 @@ url = "1"
 uuid = { version = "0.7", features = ["v4"] }
 
 [dependencies.rusoto_core]
-version = "0.36"
+version = "0.37"
 default_features = false
 features = ["rustls"]
 
 [dependencies.rusoto_s3]
-version = "0.36"
+version = "0.37"
 default_features = false
 features = ["rustls"]
