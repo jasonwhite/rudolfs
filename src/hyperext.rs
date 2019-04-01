@@ -186,25 +186,25 @@ where
 pub trait RequestExt {
     /// Gets the scheme based on the headers in the request.
     ///
-    /// There's no good way to determine the scheme for HTTP/1, so we must defer
-    /// to other methods in that case (such as from a server configuration
-    /// file).
-    ///
-    /// HTTP/2 has the `:scheme` header that can tell us the scheme.
+    /// First checks `X-Forwarded-Proto` and then falls back to the HTTP/2
+    /// `:scheme` header.
     fn scheme(&self) -> Option<Scheme>;
 
     /// Gets the authority based on the headers in the request.
     ///
-    /// First checks the HTTP/2 header `:athority` and then falls back to the
+    /// First checks the HTTP/2 header `:authority` and then falls back to the
     /// `Host` header.
     fn authority(&self) -> Option<Authority>;
 }
 
 impl<B> RequestExt for Request<B> {
     fn scheme(&self) -> Option<Scheme> {
-        self.headers().get(":scheme").and_then(|scheme| {
-            Scheme::from_shared(scheme.as_bytes().into()).ok()
-        })
+        self.headers()
+            .get("X-Forwarded-Proto")
+            .or_else(|| self.headers().get(":scheme"))
+            .and_then(|scheme| {
+                Scheme::from_shared(scheme.as_bytes().into()).ok()
+            })
     }
 
     fn authority(&self) -> Option<Authority> {

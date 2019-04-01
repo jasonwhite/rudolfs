@@ -148,7 +148,7 @@ impl LFSObject {
     pub fn split(self) -> (Self, Self) {
         let (len, stream) = self.into_parts();
 
-        let (sender, receiver) = mpsc::channel(1);
+        let (sender, receiver) = mpsc::channel(0);
 
         let stream = stream.and_then(move |chunk| {
             // TODO: Find a way to not clone the sender.

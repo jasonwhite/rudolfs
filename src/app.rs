@@ -421,7 +421,7 @@ fn basic_response(
                     size: object.size,
                     error: Some(lfs::ObjectError {
                         code: 404,
-                        message: "not found".into(),
+                        message: "object not found".into(),
                     }),
                     authenticated: Some(true),
                     actions: None,

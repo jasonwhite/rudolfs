@@ -8,11 +8,11 @@ fmt_task:
 # Run clippy.
 clippy_task:
   container:
-    image: rustlang/rust:nightly
+    image: rust:latest
   cargo_cache:
     folder: $CARGO_HOME/registry
     fingerprint_script: cat Cargo.lock
-  install_script: rustup component add clippy-preview
+  install_script: rustup component add clippy
   check_script: cargo clippy
   before_cache_script: rm -rf $CARGO_HOME/registry/index
 
