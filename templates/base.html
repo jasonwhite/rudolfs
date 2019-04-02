@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+
+        <title>{{ title }}</title>
+        <meta name="description" content="A git lfs server.">
+        <meta name="author" content="Jason White">
+
+<style>
+html {
+    font-family: Helvetica, Arial, sans-serif;
+    letter-spacing: 0.01em;
+}
+
+body {
+    line-height: 1.6;
+    color: #777;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    color: #4b4b4b;
+}
+
+a {
+    color: #3b8bba;
+    text-decoration: none;
+}
+
+a:visited {
+    color: #265778;
+}
+
+pre, code {
+    font-family: Consolas, Courier, monospace;
+    color: #333;
+    background: #fafafa;
+}
+
+code {
+    padding: 0.2em 0.4em;
+    white-space: nowrap;
+}
+
+.header .content {
+    padding-left: 2em;
+    padding-right: 2em;
+}
+
+.header {
+    margin: 0 auto;
+    padding: 1em;
+    text-align: center;
+    border-bottom: 1px solid #eee;
+    letter-spacing: 0.05em;
+    max-width: 768px;
+}
+
+.header h1 {
+    font-size: 320%;
+    font-weight: 100;
+    margin: 0;
+}
+
+.header h2 {
+    font-weight: 100;
+    margin: 0;
+    color: #666;
+    letter-spacing: -0.02em;
+}
+
+.content {
+    margin-left: auto;
+    margin-right: auto;
+    max-width: 768px;
+}
+
+.content p {
+    font-size: 1.125em;
+}
+
+.code {
+    margin-left: -1em;
+    margin-right: -1em;
+    padding: 1em;
+    border: 1px solid #eee;
+    border-left-width: 0;
+    border-right-width: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+@media screen and (min-width: 48em) {
+    .code {
+        margin-left: auto;
+        margin-right: auto;
+        border-left-width: 1px;
+        border-right-width: 1px;
+    }
+}
+
+.content p code {
+    font-size: 90%;
+}
+</style>
+    </head>
+
+    <body>
+        <div id="main">
+            <div class="header">
+                {% block header %}{% endblock %}
+            </div>
+            <div class="content">
+                {% block content %}{% endblock %}
+            </div>
+        </div>
+    </body>
+</html>

@@ -15,6 +15,7 @@ categories = ["command-line-utilities"]
 license = "MIT"
 
 [dependencies]
+askama = "0.8"
 bytes = "0.4"
 chacha = "0.3"
 derive_more = "0.14"

@@ -20,21 +20,25 @@
 use std::io;
 use std::sync::Arc;
 
+use askama::Template;
 use futures::{
     future::{self, Either},
     Future, IntoFuture, Stream,
 };
-use http::{
-    self, header,
-    uri::{Authority, Scheme},
-    StatusCode, Uri,
-};
+use http::{self, header, StatusCode, Uri};
 use hyper::{self, service::Service, Chunk, Method, Request, Response};
 
 use crate::error::Error;
 use crate::hyperext::{into_request, Body, IntoResponse, RequestExt};
 use crate::lfs;
 use crate::storage::{LFSObject, Namespace, Storage, StorageKey};
+
+#[derive(Template)]
+#[template(path = "index.html")]
+struct IndexTemplate<'a> {
+    title: &'a str,
+    api: Uri,
+}
 
 /// Shared state for all instances of the `App` service.
 pub struct State<S> {
@@ -61,6 +65,18 @@ where
 {
     pub fn new(state: Arc<State<S>>) -> Self {
         App { state }
+    }
+
+    /// Handles the index route.
+    fn index(&mut self, req: Request<Body>) -> Result<Response<Body>, Error> {
+        let template = IndexTemplate {
+            title: "Rudolfs",
+            api: req.base_uri().path_and_query("/api").build().unwrap(),
+        };
+
+        Ok(Response::builder()
+            .status(StatusCode::OK)
+            .body(template.render()?.into())?)
     }
 
     /// Generates a "404 not found" response.
@@ -253,15 +269,7 @@ where
         namespace: Namespace,
     ) -> impl Future<Item = Response<Body>, Error = Error> {
         // Get the host name and scheme.
-        let uri = Uri::builder()
-            .scheme(req.scheme().unwrap_or(Scheme::HTTP))
-            .authority(
-                req.authority()
-                    .unwrap_or_else(|| Authority::from_static("localhost")),
-            )
-            .path_and_query("/")
-            .build()
-            .unwrap();
+        let uri = req.base_uri().path_and_query("/").build().unwrap();
 
         let state = self.state.clone();
 
@@ -444,6 +452,10 @@ where
 
     fn call(&mut self, req: Request<Self::ReqBody>) -> Self::Future {
         let req = into_request(req);
+
+        if req.uri().path() == "/" {
+            return self.index(req).response();
+        }
 
         if req.uri().path().starts_with("/api/") {
             return self.api(req).response();

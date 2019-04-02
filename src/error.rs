@@ -19,6 +19,7 @@
 // SOFTWARE.
 use std::io;
 
+use askama;
 use derive_more::{Display, From};
 use http;
 use hyper;
@@ -38,6 +39,7 @@ pub enum Error {
     Sha256VerifyError(Sha256VerifyError),
     S3(storage::S3Error),
     S3DiskCache(<storage::S3DiskCache as Storage>::Error),
+    Askama(askama::Error),
 }
 
 impl std::error::Error for Error {}

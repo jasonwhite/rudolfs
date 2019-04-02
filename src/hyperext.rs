@@ -21,7 +21,7 @@ use std::ops::Deref;
 
 use derive_more::From;
 use futures::{Future, IntoFuture, Poll, Stream};
-use http::uri::{Authority, Scheme};
+use http::uri::{self, Authority, Scheme, Uri};
 use hyper::{
     body::{Payload, Sender},
     Body as HBody, Chunk, HeaderMap, Request, Response,
@@ -195,6 +195,16 @@ pub trait RequestExt {
     /// First checks the HTTP/2 header `:authority` and then falls back to the
     /// `Host` header.
     fn authority(&self) -> Option<Authority>;
+
+    fn base_uri(&self) -> uri::Builder {
+        let mut builder = Uri::builder();
+        builder.scheme(self.scheme().unwrap_or(Scheme::HTTP));
+        builder.authority(
+            self.authority()
+                .unwrap_or_else(|| Authority::from_static("localhost")),
+        );
+        builder
+    }
 }
 
 impl<B> RequestExt for Request<B> {

@@ -3,5 +3,6 @@
 
 # Only include these files.
 !/src/**
+!/templates/**
 !/Cargo.toml
 !/Cargo.lock

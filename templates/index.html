@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block header %}
+<h1><a href="https://github.com/jasonwhite/rudolfs">{{ title }}</a></h1>
+<h2>A high-performance, caching <a
+        href="https://git-lfs.github.com">Git LFS</a> server.</h2>
+{% endblock header %}
+
+{% block content %}
+<p>
+To use this Git LFS server in your project, add a file named
+<code>.lfsconfig</code> to the root of your repository with the
+following contents:</p>
+<p>
+    <pre class="code">[lfs]
+url = "{{ api }}/my-org/my-repo"</pre>
+</p>
+<p>
+...where <code>my-org/my-repo</code> is the name of the Git
+repository.
+</p>
+<p>
+Please see <a href="https://git-lfs.github.com/">https://git-lfs.github.com/</a>
+for more information about how to use the Git LFS client.
+</p>
+{% endblock content %}
