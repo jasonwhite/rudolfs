@@ -20,12 +20,14 @@
 mod cached;
 mod disk;
 mod encrypt;
+mod retrying;
 mod s3;
 mod verify;
 
 pub use cached::{Backend as Cached, Error as CacheError};
 pub use disk::Backend as Disk;
 pub use encrypt::Backend as Encrypted;
+pub use retrying::Backend as Retrying;
 pub use s3::{Backend as S3, Error as S3Error};
 pub use verify::Backend as Verify;
 

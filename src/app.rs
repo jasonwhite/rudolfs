@@ -17,6 +17,7 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+use std::fmt;
 use std::io;
 use std::sync::Arc;
 
@@ -290,11 +291,11 @@ where
                                     object.oid,
                                 );
 
-                                state.storage.size(&key).map(move |size| {
+                                state.storage.size(&key).then(move |size| {
                                     let (namespace, _) = key.into_parts();
-                                    basic_response(
+                                    Ok(basic_response(
                                         uri, object, operation, size, namespace,
-                                    )
+                                    ))
                                 })
                             });
 
@@ -339,14 +340,17 @@ where
     }
 }
 
-fn basic_response(
+fn basic_response<E>(
     uri: Uri,
     object: lfs::RequestObject,
     op: lfs::Operation,
-    size: Option<u64>,
+    size: Result<Option<u64>, E>,
     namespace: Namespace,
-) -> lfs::ResponseObject {
-    if let Some(size) = size {
+) -> lfs::ResponseObject
+where
+    E: fmt::Display,
+{
+    if let Ok(Some(size)) = size {
         // Ensure that the client and server agree on the size of the object.
         if object.size != size {
             return lfs::ResponseObject {
@@ -359,11 +363,35 @@ fn basic_response(
                         object.size, size
                     ),
                 }),
-                authenticated: None,
+                authenticated: Some(true),
                 actions: None,
             };
         }
     }
+
+    let size = match size {
+        Ok(size) => size,
+        Err(err) => {
+            log::error!("batch response error: {}", err);
+
+            // Return a generic "500 - Internal Server Error" for objects that
+            // we failed to get the size of. This is usually caused by some
+            // intermittent problem on the storage backend. A retry strategy
+            // should be implemented on the storage backend to help mitigate
+            // this possibility because the git-lfs client does not currenty
+            // implement retries in this case.
+            return lfs::ResponseObject {
+                oid: object.oid,
+                size: object.size,
+                error: Some(lfs::ObjectError {
+                    code: 500,
+                    message: err.to_string(),
+                }),
+                authenticated: Some(true),
+                actions: None,
+            };
+        }
+    };
 
     let href = format!("{}api/{}/object/{}", uri, namespace, object.oid);
 

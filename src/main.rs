@@ -41,7 +41,7 @@ use structopt::StructOpt;
 use crate::app::{App, State};
 use crate::error::Error;
 use crate::logger::Logger;
-use crate::storage::{Cached, Disk, Encrypted, Verify, S3};
+use crate::storage::{Cached, Disk, Encrypted, Retrying, Verify, S3};
 
 #[derive(StructOpt)]
 struct Args {
@@ -103,7 +103,7 @@ impl Args {
             .join(s3)
             .and_then(move |(disk, s3)| {
                 // Use the disk as a cache.
-                Cached::new(max_cache_size, disk, s3).from_err()
+                Cached::new(max_cache_size, disk, Retrying::new(s3)).from_err()
             })
             .map(move |storage| {
                 // Verify object SHA256s as they are uploaded and downloaded.
