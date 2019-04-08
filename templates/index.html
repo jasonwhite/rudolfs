@@ -7,18 +7,35 @@
 {% endblock header %}
 
 {% block content %}
+
+<p>To use this Git LFS server in your project, follow these steps:</p>
 <p>
-To use this Git LFS server in your project, add a file named
-<code>.lfsconfig</code> to the root of your repository with the
-following contents:</p>
-<p>
-    <pre class="code">[lfs]
-url = "{{ api }}/my-org/my-repo"</pre>
-</p>
-<p>
-...where <code>my-org/my-repo</code> is the name of the Git
-repository.
-</p>
+<ol>
+    <li>
+        <p>Add a file named <code>.lfsconfig</code> to the root of your
+        repository with the following contents:</p>
+        <p><pre class="code">[lfs]
+url = "{{ api }}/my-org/my-repo"</pre></p>
+        <p>...where <code>my-org/my-repo</code> is the name of the Git repository.</p>
+        <p>Make sure <code>.lfsconfig</code> is committed:</p>
+        <p><pre class="code">git add .lfsconfig</pre></p>
+    </li>
+    <li>
+        <p>Select the file types you'd like Git LFS to manage (or directly edit
+        your <code>.gitattributes</code>). You can configure additional file
+        extensions at anytime.</p>
+        <p><pre class="code">git lfs track "*.psd"</pre></p>
+        <p>Make sure <code>.gitattributes</code> is committed:</p>
+        <p><pre class="code">git add .gitattributes</pre></p>
+    </li>
+    <li>
+        <p>Use <code>git add</code>, <code>git commit</code>, and <code>git
+            push</code> as you normally would:</p>
+        <p><pre class="code">git add foo.psd
+git commit -m "Add design file"
+git push</pre></p>
+    </li>
+</ol>
 <p>
 Please see <a href="https://git-lfs.github.com/">https://git-lfs.github.com/</a>
 for more information about how to use the Git LFS client.
