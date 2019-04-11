@@ -23,7 +23,7 @@ A high-performance, caching Git LFS server with an AWS S3 back-end.
 
  - A tiny (&lt;10MB) Docker image ([jasonwhite0/rudolfs][]).
 
-[jasonwhite0/rudolfs]: https://cloud.docker.com/repository/docker/jasonwhite0/rudolfs
+[jasonwhite0/rudolfs]: https://hub.docker.com/r/jasonwhite0/rudolfs
 
 The back-end storage code is very modular and composable. PRs for implementing
 other storage back-ends are welcome. If you begin working on this, please let us
