@@ -1,7 +1,7 @@
 [package]
 name = "rudolfs"
 version = "0.2.4"
-authors = ["Jason White <jasonaw0@gmail.com>"]
+authors = ["Jason White <rust@jasonwhite.io>"]
 edition = "2018"
 description = """
 A high-performance, caching Git LFS server with an AWS S3 back-end.
