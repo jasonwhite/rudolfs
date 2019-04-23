@@ -350,6 +350,8 @@ fn basic_response<E>(
 where
     E: fmt::Display,
 {
+    let authenticated = false;
+
     if let Ok(Some(size)) = size {
         // Ensure that the client and server agree on the size of the object.
         if object.size != size {
@@ -363,7 +365,7 @@ where
                         object.size, size
                     ),
                 }),
-                authenticated: Some(true),
+                authenticated: Some(authenticated),
                 actions: None,
             };
         }
@@ -387,7 +389,7 @@ where
                     code: 500,
                     message: err.to_string(),
                 }),
-                authenticated: Some(true),
+                authenticated: Some(authenticated),
                 actions: None,
             };
         }
@@ -413,14 +415,14 @@ where
                     oid: object.oid,
                     size,
                     error: None,
-                    authenticated: Some(true),
+                    authenticated: Some(authenticated),
                     actions: None,
                 },
                 None => lfs::ResponseObject {
                     oid: object.oid,
                     size: object.size,
                     error: None,
-                    authenticated: Some(true),
+                    authenticated: Some(authenticated),
                     actions: Some(lfs::Actions {
                         download: None,
                         upload: Some(action.clone()),
@@ -445,7 +447,7 @@ where
                     oid: object.oid,
                     size,
                     error: None,
-                    authenticated: Some(true),
+                    authenticated: Some(authenticated),
                     actions: Some(lfs::Actions {
                         download: Some(action),
                         upload: None,
@@ -459,7 +461,7 @@ where
                         code: 404,
                         message: "object not found".into(),
                     }),
-                    authenticated: Some(true),
+                    authenticated: Some(authenticated),
                     actions: None,
                 },
             }
