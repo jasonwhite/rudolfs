@@ -178,6 +178,32 @@ impl LFSObject {
 
         (a, b)
     }
+
+    pub fn fanout(
+        self,
+    ) -> (impl Future<Item = (), Error = io::Error>, Self, Self) {
+        let (len, stream) = self.into_parts();
+
+        let (sender_a, receiver_a) = mpsc::channel(0);
+        let (sender_b, receiver_b) = mpsc::channel(0);
+
+        let sink = sender_a
+            .fanout(sender_b)
+            .sink_map_err(|e| io::Error::new(io::ErrorKind::Other, e));
+
+        let receiver_a = receiver_a.map_err(|()| {
+            io::Error::new(io::ErrorKind::Other, "failed receiving byte stream")
+        });
+        let receiver_b = receiver_b.map_err(|()| {
+            io::Error::new(io::ErrorKind::Other, "failed receiving byte stream")
+        });
+
+        let f = stream.forward(sink).map(|_| ());
+        let a = LFSObject::new(len, Box::new(receiver_a));
+        let b = LFSObject::new(len, Box::new(receiver_b));
+
+        (f, a, b)
+    }
 }
 
 /// Trait for abstracting away the storage medium.

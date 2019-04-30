@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 use std::fmt;
+use std::io;
 use std::sync::{Arc, Mutex};
 
 use futures::{
@@ -39,6 +40,9 @@ pub enum Error<C, S> {
 
     /// An error that occurred in the storage backend.
     Storage(S),
+
+    /// An error that occurred in the stream.
+    Stream(io::Error),
 }
 
 impl<C, S> fmt::Display for Error<C, S>
@@ -50,6 +54,7 @@ where
         match self {
             Error::Cache(x) => fmt::Display::fmt(&x, f),
             Error::Storage(x) => fmt::Display::fmt(&x, f),
+            Error::Stream(x) => fmt::Display::fmt(&x, f),
         }
     }
 }
@@ -61,6 +66,10 @@ impl<C, S> Error<C, S> {
 
     pub fn from_storage(error: S) -> Self {
         Error::Storage(error)
+    }
+
+    pub fn from_stream(error: io::Error) -> Self {
+        Error::Stream(error)
     }
 }
 
@@ -146,7 +155,7 @@ fn cache_and_prune<C>(
     obj: LFSObject,
     lru: Arc<Mutex<Cache>>,
     max_size: u64,
-) -> impl Future<Item = (), Error = ()>
+) -> impl Future<Item = (), Error = C::Error>
 where
     C: Storage,
 {
@@ -170,6 +179,7 @@ where
         })
         .map_err(move |err| {
             log::error!("Error caching {} ({})", oid, err);
+            err
         })
 }
 
@@ -247,9 +257,18 @@ where
                         // getting the LFS object. For example, even if we run
                         // out of disk space, the server should still continue
                         // operating.
-                        tokio::spawn(cache_and_prune(
-                            cache, key, b, lru, max_size,
-                        ));
+                        tokio::spawn(
+                            cache_and_prune(
+                                cache,
+                                key.clone(),
+                                b,
+                                lru,
+                                max_size,
+                            )
+                            .map_err(move |err| {
+                                log::error!("Error caching {} ({})", key, err);
+                            }),
+                        );
 
                         // Send the object from permanent-storage.
                         Either::A(future::ok(Some(a)))
@@ -275,15 +294,17 @@ where
         let max_size = self.max_size;
         let cache = self.cache.clone();
 
-        let (a, b) = value.split();
+        let (f, a, b) = value.fanout();
 
-        // Cache the object in the background. Whether or not this succeeds
-        // shouldn't prevent the client from uploading the LFS object to
-        // permanent storage. For example, even if we run out of disk space, the
-        // server should still continue operating.
-        tokio::spawn(cache_and_prune(cache, key.clone(), b, lru, max_size));
+        let cache = cache_and_prune(cache, key.clone(), b, lru, max_size)
+            .map_err(Error::from_cache);
+        let store = self.storage.put(key, a).map_err(Error::from_storage);
 
-        Box::new(self.storage.put(key, a).map_err(Error::from_storage))
+        Box::new(
+            f.map_err(Error::from_stream)
+                .join3(cache, store)
+                .map(|(_, (), ())| ()),
+        )
     }
 
     fn size(
