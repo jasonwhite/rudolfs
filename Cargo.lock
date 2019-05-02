@@ -1035,7 +1035,7 @@ dependencies = [
 
 [[package]]
 name = "rudolfs"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "askama 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bytes 0.4.12 (registry+https://github.com/rust-lang/crates.io-index)",
