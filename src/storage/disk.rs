@@ -22,11 +22,14 @@ use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use bytes::BytesMut;
-use futures::{future, Future, Stream};
+use bytes::{BufMut, Bytes, BytesMut};
+use futures::{
+    future::{self, Either},
+    Future, Stream,
+};
 use tokio::{
     self,
-    codec::{BytesCodec, Framed},
+    codec::{Decoder, Encoder, Framed},
     fs,
 };
 use uuid::Uuid;
@@ -35,6 +38,7 @@ use super::{
     LFSObject, Namespace, Storage, StorageFuture, StorageKey, StorageStream,
 };
 use crate::lfs::Oid;
+use crate::util::NamedTempFile;
 
 pub struct Backend {
     root: PathBuf,
@@ -95,18 +99,43 @@ impl Storage for Backend {
         let path = self.key_to_path(&key);
         let dir = path.parent().unwrap().to_path_buf();
 
+        let (len, stream) = value.into_parts();
+
         let incomplete = self.root.join("incomplete");
         let temp_path = incomplete.join(Uuid::new_v4().to_string());
-        let temp_path2 = temp_path.clone();
 
         Box::new(
             fs::create_dir_all(incomplete)
-                .and_then(move |()| fs::File::create(temp_path))
-                .and_then(move |file| {
-                    value.stream().forward(Framed::new(file, BytesCodec::new()))
+                .and_then(move |()| {
+                    // Note that when this is dropped, the file is deleted.
+                    // Thus, if anything goes wrong we are not left with
+                    // a temporary file laying around.
+                    NamedTempFile::new(temp_path)
                 })
-                .and_then(move |_| fs::create_dir_all(dir))
-                .and_then(move |()| fs::rename(temp_path2, path)),
+                .and_then(move |file| {
+                    stream.forward(Framed::new(file, BytesCodec::new()))
+                })
+                .and_then(move |(_, sink)| {
+                    let written = sink.codec().written();
+                    let file = sink.into_inner();
+
+                    if written != len {
+                        // If we didn't get a full object, we cannot save it to
+                        // disk. This can happen if we're using the disk as
+                        // a cache and there is an error in the middle of the
+                        // upload.
+                        Either::A(future::err(io::Error::new(
+                            io::ErrorKind::Other,
+                            "got incomplete object",
+                        )))
+                    } else {
+                        Either::B(
+                            fs::create_dir_all(dir)
+                                .and_then(move |()| file.persist(path))
+                                .map(|_| ()),
+                        )
+                    }
+                }),
         )
     }
 
@@ -142,7 +171,7 @@ impl Storage for Backend {
     ///
     /// The directory structure is assumed to be like this:
     ///
-    ///     objects
+    ///     objects/{org}/{project}/
     ///     ├── 00
     ///     │   ├── 07
     ///     │   │   └── 0007941906960...
@@ -198,5 +227,54 @@ impl Storage for Backend {
                     }
                 }),
         )
+    }
+}
+
+/// A simple bytes codec that keeps track of its length.
+struct BytesCodec {
+    written: u64,
+}
+
+impl BytesCodec {
+    pub fn new() -> Self {
+        BytesCodec { written: 0 }
+    }
+
+    pub fn written(&self) -> u64 {
+        self.written
+    }
+}
+
+impl Decoder for BytesCodec {
+    type Item = BytesMut;
+    type Error = io::Error;
+
+    fn decode(
+        &mut self,
+        buf: &mut BytesMut,
+    ) -> Result<Option<Self::Item>, Self::Error> {
+        if !buf.is_empty() {
+            let len = buf.len();
+            Ok(Some(buf.split_to(len)))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl Encoder for BytesCodec {
+    type Item = Bytes;
+    type Error = io::Error;
+
+    fn encode(
+        &mut self,
+        data: Bytes,
+        buf: &mut BytesMut,
+    ) -> Result<(), io::Error> {
+        let len = data.len();
+        self.written += len as u64;
+        buf.reserve(len);
+        buf.put(data);
+        Ok(())
     }
 }

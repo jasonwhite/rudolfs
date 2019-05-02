@@ -25,6 +25,7 @@ mod logger;
 mod lru;
 mod sha256;
 mod storage;
+mod util;
 
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
@@ -42,6 +43,9 @@ use crate::app::{App, State};
 use crate::error::Error;
 use crate::logger::Logger;
 use crate::storage::{Cached, Disk, Encrypted, Retrying, Verify, S3};
+
+#[cfg(feature = "faulty")]
+use crate::storage::Faulty;
 
 #[derive(StructOpt)]
 struct Args {
@@ -102,8 +106,17 @@ impl Args {
         let storage = disk
             .join(s3)
             .and_then(move |(disk, s3)| {
+                // Retry certain operations to S3 to make it more reliable.
+                let s3 = Retrying::new(s3);
+
+                // Add a little instability for testing purposes.
+                #[cfg(feature = "faulty")]
+                let s3 = Faulty::new(s3);
+                #[cfg(feature = "faulty")]
+                let disk = Faulty::new(disk);
+
                 // Use the disk as a cache.
-                Cached::new(max_cache_size, disk, Retrying::new(s3)).from_err()
+                Cached::new(max_cache_size, disk, s3).from_err()
             })
             .map(move |storage| {
                 // Verify object SHA256s as they are uploaded and downloaded.

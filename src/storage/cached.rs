@@ -21,9 +21,12 @@ use std::fmt;
 use std::io;
 use std::sync::{Arc, Mutex};
 
+use bytes::Bytes;
 use futures::{
     future::{self, Either},
-    stream, Future, Stream,
+    stream,
+    sync::oneshot,
+    Future, Stream,
 };
 use tokio;
 
@@ -250,24 +253,33 @@ where
                 .and_then(move |obj| match obj {
                     Some(obj) => {
                         // Cache the returned LFS object.
-                        let (a, b) = obj.split();
+                        let (f, a, b) = obj.fanout();
 
                         // Cache the object in the background.  Whether or not
                         // this succeeds shouldn't prevent the client from
                         // getting the LFS object. For example, even if we run
                         // out of disk space, the server should still continue
                         // operating.
+                        let cache = cache_and_prune(
+                            cache,
+                            key.clone(),
+                            b,
+                            lru,
+                            max_size,
+                        )
+                        .map_err(Error::from_cache);
+
                         tokio::spawn(
-                            cache_and_prune(
-                                cache,
-                                key.clone(),
-                                b,
-                                lru,
-                                max_size,
-                            )
-                            .map_err(move |err| {
-                                log::error!("Error caching {} ({})", key, err);
-                            }),
+                            f.map_err(Error::from_stream)
+                                .join(cache)
+                                .map(|((), ())| ())
+                                .map_err(move |err: Self::Error| {
+                                    log::error!(
+                                        "Error caching {} ({})",
+                                        key,
+                                        err
+                                    );
+                                }),
                         );
 
                         // Send the object from permanent-storage.
@@ -296,9 +308,44 @@ where
 
         let (f, a, b) = value.fanout();
 
-        let cache = cache_and_prune(cache, key.clone(), b, lru, max_size)
-            .map_err(Error::from_cache);
-        let store = self.storage.put(key, a).map_err(Error::from_storage);
+        // Note: We can only cache an object if it is successfully uploaded to
+        // the store. Thus, we do something clever with this one shot channel.
+        //
+        // When the permanent storage finishes receiving its LFS object, we send
+        // a signal to be received by an empty chunk at the end of the stream
+        // going to the cache. Then, the cache only receives its last (empty)
+        // chunk when the LFS object has been successfully stored.
+        let (signal_sender, signal_receiver) = oneshot::channel();
+
+        let store = self
+            .storage
+            .put(key.clone(), a)
+            .map(move |()| {
+                // Send a signal to the cache so that it can complete its write.
+                signal_sender.send(()).unwrap_or(())
+            })
+            .map_err(Error::from_storage);
+
+        let (len, stream) = b.into_parts();
+
+        // Add an empty chunk to the end of the stream whose only job is to
+        // complete when it receives a signal that the upload completed to
+        // permanent storage.
+        let stream = stream.chain(
+            signal_receiver
+                .map(|()| Bytes::new())
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+                .into_stream(),
+        );
+
+        let cache = cache_and_prune(
+            cache,
+            key,
+            LFSObject::new(len, Box::new(stream)),
+            lru,
+            max_size,
+        )
+        .map_err(Error::from_cache);
 
         Box::new(
             f.map_err(Error::from_stream)

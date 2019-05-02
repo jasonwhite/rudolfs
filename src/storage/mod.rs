@@ -20,6 +20,8 @@
 mod cached;
 mod disk;
 mod encrypt;
+#[cfg(feature = "faulty")]
+mod faulty;
 mod retrying;
 mod s3;
 mod verify;
@@ -27,6 +29,8 @@ mod verify;
 pub use cached::{Backend as Cached, Error as CacheError};
 pub use disk::Backend as Disk;
 pub use encrypt::Backend as Encrypted;
+#[cfg(feature = "faulty")]
+pub use faulty::Backend as Faulty;
 pub use retrying::Backend as Retrying;
 pub use s3::{Backend as S3, Error as S3Error};
 pub use verify::Backend as Verify;
@@ -147,38 +151,6 @@ impl LFSObject {
     ///
     /// This is useful for caching LFS objects while simultaneously sending them
     /// to a client.
-    pub fn split(self) -> (Self, Self) {
-        let (len, stream) = self.into_parts();
-
-        let (sender, receiver) = mpsc::channel(0);
-
-        let stream = stream.and_then(move |chunk| {
-            // TODO: Find a way to not clone the sender.
-            sender
-                .clone()
-                .send(chunk.clone())
-                .and_then(move |_| Ok(chunk))
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-        });
-
-        let a = LFSObject {
-            len,
-            stream: Box::new(stream),
-        };
-
-        let b = LFSObject {
-            len,
-            stream: Box::new(receiver.map_err(|()| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    "failed during body duplication",
-                )
-            })),
-        };
-
-        (a, b)
-    }
-
     pub fn fanout(
         self,
     ) -> (impl Future<Item = (), Error = io::Error>, Self, Self) {

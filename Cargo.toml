@@ -37,6 +37,7 @@ structopt = "0.2"
 tokio = "0.1"
 url = "1"
 uuid = { version = "0.7", features = ["v4"] }
+rand = { version = "0.6", optional = true }
 
 [dependencies.rusoto_core]
 version = "0.37"
@@ -47,3 +48,9 @@ features = ["rustls"]
 version = "0.37"
 default_features = false
 features = ["rustls"]
+
+[features]
+default = []
+# If the "faulty" feature is enabled, random failures are injected into the byte
+# stream.
+faulty = ["rand"]
