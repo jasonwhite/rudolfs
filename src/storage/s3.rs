@@ -95,15 +95,17 @@ impl Backend {
         while prefix.ends_with('/') {
             prefix.pop();
         }
+
         // `Region::default` will get try to get the region from the environment
         // and fallback to a default if it isn't found.
         let mut region = Region::default();
         if let Ok(endpoint) = std::env::var("AWS_S3_ENDPOINT") {
             region = Region::Custom {
                 name: region.name().to_owned(),
-                endpoint: endpoint,
+                endpoint,
             }
         }
+
         Backend::with_client(S3Client::new(region), bucket, prefix)
     }
 }
