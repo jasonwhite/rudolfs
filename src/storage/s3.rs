@@ -21,7 +21,7 @@ use bytes::Bytes;
 use derive_more::{Display, From};
 use futures::{future, stream, Future, Stream};
 use http::StatusCode;
-use rusoto_core::Region;
+use rusoto_core::{Region, RusotoError};
 use rusoto_s3::{
     GetObjectError, GetObjectRequest, HeadBucketError, HeadBucketRequest,
     HeadObjectError, HeadObjectRequest, PutObjectError, PutObjectRequest,
@@ -32,9 +32,9 @@ use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
 
 #[derive(Debug, From, Display)]
 pub enum Error {
-    GetObjectError(GetObjectError),
-    PutObjectError(PutObjectError),
-    HeadObjectError(HeadObjectError),
+    Get(RusotoError<GetObjectError>),
+    Put(RusotoError<PutObjectError>),
+    Head(RusotoError<HeadObjectError>),
 
     /// Initialization error.
     Init(InitError),
@@ -54,22 +54,28 @@ pub enum InitError {
     Credentials,
 
     #[display(fmt = "{}", _0)]
-    Other(HeadBucketError),
+    Other(String),
 }
 
-impl From<HeadBucketError> for InitError {
-    fn from(err: HeadBucketError) -> Self {
+impl From<RusotoError<HeadBucketError>> for InitError {
+    fn from(err: RusotoError<HeadBucketError>) -> Self {
         match err {
-            HeadBucketError::Unknown(r) => {
+            RusotoError::Credentials(_) => InitError::Credentials,
+            RusotoError::Unknown(r) => {
                 // Rusoto really sucks at correctly reporting errors.
                 // Lets work around that here.
                 match r.status {
                     StatusCode::NOT_FOUND => InitError::Bucket,
                     StatusCode::FORBIDDEN => InitError::Credentials,
-                    _ => InitError::Other(HeadBucketError::Unknown(r)),
+                    _ => {
+                        InitError::Other("S3 returned an unknown error".into())
+                    }
                 }
             }
-            x => InitError::Other(x),
+            RusotoError::Service(HeadBucketError::NoSuchBucket(_)) => {
+                InitError::Bucket
+            }
+            x => InitError::Other(x.to_string()),
         }
     }
 }
@@ -168,7 +174,10 @@ where
                         Box::new(object.body.unwrap().map(Bytes::from)),
                     ))),
                     Err(err) => {
-                        if let GetObjectError::NoSuchKey(_) = &err {
+                        if let RusotoError::Service(
+                            GetObjectError::NoSuchKey(_),
+                        ) = &err
+                        {
                             Ok(None)
                         } else {
                             Err(err)
@@ -185,13 +194,6 @@ where
         value: LFSObject,
     ) -> StorageFuture<(), Self::Error> {
         let (len, stream) = value.into_parts();
-
-        let stream = stream.map(|chunk| {
-            // Since Rusoto doesn't use a reference counted chunk of bytes,
-            // we must copy to a new `Vec<u8>` here. See:
-            // https://github.com/rusoto/rusoto/issues/1028
-            Vec::from(chunk.as_ref())
-        });
 
         let request = PutObjectRequest {
             bucket: self.bucket.clone(),
@@ -223,7 +225,7 @@ where
                     }
                     Err(err) => {
                         match &err {
-                            HeadObjectError::Unknown(e) => {
+                            RusotoError::Unknown(e) => {
                                 // There is a bug in Rusoto that causes it to
                                 // always return an "unknown" error when the key
                                 // does not exist. Thus we must check the error
@@ -235,7 +237,9 @@ where
                                     Err(err)
                                 }
                             }
-                            HeadObjectError::NoSuchKey(_) => Ok(None),
+                            RusotoError::Service(
+                                HeadObjectError::NoSuchKey(_),
+                            ) => Ok(None),
                             _ => Err(err),
                         }
                     }
