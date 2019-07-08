@@ -114,38 +114,4 @@ where
             None
         }
     }
-
-    /// Returns a future that prunes the least recently used entries that cause
-    /// the cache to exceed the given maximum size.
-    ///
-    /// If the stream is thrown away, then the items will not be deleted.
-    #[cfg(none)]
-    pub fn prune(
-        &mut self,
-        root: PathBuf,
-        max_size: u64,
-    ) -> impl Future<Item = usize, Error = io::Error> {
-        if max_size == 0 {
-            return Either::A(future::ok(0));
-        }
-
-        let mut to_delete = Vec::new();
-
-        while self.size() > max_size {
-            if let Some((oid, _)) = self.pop() {
-                to_delete.push(oid);
-            }
-        }
-
-        Either::B(stream::iter_ok(to_delete).fold(0, move |acc, oid| {
-            let path = root.join(format!("objects/{}", oid.path()));
-
-            fs::remove_file(path)
-                .map_err(move |e| {
-                    log::error!("Failed to delete '{}' ({})", oid, e);
-                    e
-                })
-                .map(move |()| acc + 1)
-        }))
-    }
 }
