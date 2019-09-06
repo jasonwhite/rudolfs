@@ -41,7 +41,7 @@ use bytes::Bytes;
 use std::io;
 
 use crate::lfs::Oid;
-use futures::{sync::mpsc, Future, Sink, Stream};
+use futures::{future::Either, sync::mpsc, Future, Sink, Stream};
 
 pub type S3DiskCache = Cached<Disk, S3>;
 
@@ -265,5 +265,72 @@ where
 
     fn max_size(&self) -> Option<u64> {
         (**self).max_size()
+    }
+}
+
+impl<A, B> Storage for Either<A, B>
+where
+    A: Storage + Send + Sync + 'static,
+    B: Storage<Error = A::Error> + Send + Sync + 'static,
+{
+    type Error = A::Error;
+
+    fn get(
+        &self,
+        key: &StorageKey,
+    ) -> StorageFuture<Option<LFSObject>, Self::Error> {
+        match self {
+            Either::A(x) => x.get(key),
+            Either::B(x) => x.get(key),
+        }
+    }
+
+    fn put(
+        &self,
+        key: StorageKey,
+        value: LFSObject,
+    ) -> StorageFuture<(), Self::Error> {
+        match self {
+            Either::A(x) => x.put(key, value),
+            Either::B(x) => x.put(key, value),
+        }
+    }
+
+    fn size(
+        &self,
+        key: &StorageKey,
+    ) -> StorageFuture<Option<u64>, Self::Error> {
+        match self {
+            Either::A(x) => x.size(key),
+            Either::B(x) => x.size(key),
+        }
+    }
+
+    fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error> {
+        match self {
+            Either::A(x) => x.delete(key),
+            Either::B(x) => x.delete(key),
+        }
+    }
+
+    fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
+        match self {
+            Either::A(x) => x.list(),
+            Either::B(x) => x.list(),
+        }
+    }
+
+    fn total_size(&self) -> Option<u64> {
+        match self {
+            Either::A(x) => x.total_size(),
+            Either::B(x) => x.total_size(),
+        }
+    }
+
+    fn max_size(&self) -> Option<u64> {
+        match self {
+            Either::A(x) => x.max_size(),
+            Either::B(x) => x.max_size(),
+        }
     }
 }

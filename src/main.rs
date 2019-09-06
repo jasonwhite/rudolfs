@@ -32,7 +32,7 @@ use std::path::PathBuf;
 use std::process::exit;
 use std::sync::Arc;
 
-use futures::Future;
+use futures::{future::Either, Future};
 use hex::FromHex;
 use hyper::{self, server::conn::AddrStream, service::make_service_fn, Server};
 use log;
@@ -69,9 +69,10 @@ struct Args {
     #[structopt(long = "s3-prefix", default_value = "lfs")]
     s3_prefix: String,
 
-    /// Encryption key to use.
+    /// Encryption key to use. If not specified, then objects are *not*
+    /// encrypted.
     #[structopt(long = "key", parse(try_from_str = "FromHex::from_hex"))]
-    key: [u8; 32],
+    key: Option<[u8; 32]>,
 
     /// Maximum size of the cache, in bytes. Set to 0 for an unlimited cache
     /// size.
@@ -119,8 +120,16 @@ impl Args {
                 Cached::new(max_cache_size, disk, s3).from_err()
             })
             .map(move |storage| {
-                // Verify object SHA256s as they are uploaded and downloaded.
-                Verify::new(Encrypted::new(key, storage))
+                // Verify object SHA256s as they are uploaded and
+                // downloaded.
+                match key {
+                    Some(key) => {
+                        // Also encrypt the stream if an encryption key is
+                        // specified.
+                        Either::A(Verify::new(Encrypted::new(key, storage)))
+                    }
+                    None => Either::B(Verify::new(storage)),
+                }
             });
 
         log::info!("Initializing storage...");
