@@ -159,7 +159,7 @@ where
         self.state.storage.get(&key).from_err::<Error>().and_then(
             move |object| -> Result<_, Error> {
                 if let Some(object) = object {
-                    return Response::builder()
+                    Response::builder()
                         .status(StatusCode::OK)
                         .header(
                             header::CONTENT_TYPE,
@@ -167,12 +167,12 @@ where
                         )
                         .header(header::CONTENT_LENGTH, object.len())
                         .body(Body::wrap_stream(object.stream()))
-                        .map_err(Into::into);
+                        .map_err(Into::into)
                 } else {
-                    return Response::builder()
+                    Response::builder()
                         .status(StatusCode::NOT_FOUND)
                         .body(Body::empty())
-                        .map_err(Into::into);
+                        .map_err(Into::into)
                 }
             },
         )
