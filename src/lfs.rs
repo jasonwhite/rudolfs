@@ -34,10 +34,16 @@ pub enum Operation {
 
 /// A transfer adaptor.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum Transfer {
-    /// Basic transfer adaptor.
+    /// Basic transfer adapter.
     Basic,
+
+    LfsStandaloneFile,
+
+    /// Catch-all for custom transfer adapters.
+    #[serde(other)]
+    Custom,
 }
 
 /// An LFS object in a request.
