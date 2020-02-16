@@ -20,7 +20,9 @@
 use bytes::Bytes;
 use derive_more::{Display, From};
 use futures::{future, stream, Future, Stream};
+use futures_backoff::retry;
 use http::StatusCode;
+use log;
 use rusoto_core::{Region, RusotoError};
 use rusoto_s3::{
     GetObjectError, GetObjectRequest, HeadBucketError, HeadBucketRequest,
@@ -116,31 +118,37 @@ impl Backend {
     }
 }
 
-impl<C> Backend<C>
-where
-    C: S3,
-{
+impl<C> Backend<C> {
     pub fn with_client(
         client: C,
         bucket: String,
         prefix: String,
-    ) -> impl Future<Item = Self, Error = Error> {
-        // Peform a HEAD operation to check that the bucket exists and that our
-        // credentials work. This helps catch very common errors early on
-        // application startup.
+    ) -> impl Future<Item = Self, Error = Error>
+    where
+        C: S3 + Clone,
+    {
+        // Perform a HEAD operation to check that the bucket exists and that
+        // our credentials work. This helps catch very common
+        // errors early on application startup.
         let req = HeadBucketRequest {
             bucket: bucket.clone(),
         };
 
-        client
-            .head_bucket(req)
-            .map_err(InitError::from)
-            .from_err()
-            .map(move |()| Backend {
-                client,
-                bucket,
-                prefix,
+        let c = client.clone();
+
+        retry(move || {
+            c.head_bucket(req.clone()).map_err(|e| {
+                log::error!("Failed to query S3 bucket ('{}'). Retrying...", e);
+                e
             })
+        })
+        .map_err(InitError::from)
+        .from_err()
+        .map(move |()| Backend {
+            client,
+            bucket,
+            prefix,
+        })
     }
 
     fn key_to_path(&self, key: &StorageKey) -> String {

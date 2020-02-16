@@ -12,12 +12,12 @@ services:
       - data:/data
     restart: always
     environment:
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
-      - LFS_ENCRYPTION_KEY=${LFS_ENCRYPTION_KEY}
-      - LFS_S3_BUCKET=${LFS_S3_BUCKET}
-      - LFS_MAX_CACHE_SIZE=${LFS_MAX_CACHE_SIZE}
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_DEFAULT_REGION
+      - LFS_ENCRYPTION_KEY
+      - LFS_S3_BUCKET
+      - LFS_MAX_CACHE_SIZE
     entrypoint:
       - /tini
       - --
