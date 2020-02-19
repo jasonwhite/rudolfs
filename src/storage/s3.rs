@@ -69,9 +69,10 @@ impl From<RusotoError<HeadBucketError>> for InitError {
                 match r.status {
                     StatusCode::NOT_FOUND => InitError::Bucket,
                     StatusCode::FORBIDDEN => InitError::Credentials,
-                    _ => {
-                        InitError::Other("S3 returned an unknown error".into())
-                    }
+                    _ => InitError::Other(format!(
+                        "S3 returned HTTP status {}",
+                        r.status
+                    )),
                 }
             }
             RusotoError::Service(HeadBucketError::NoSuchBucket(_)) => {
