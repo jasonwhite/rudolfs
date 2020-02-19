@@ -82,9 +82,16 @@ struct Args {
 impl Args {
     fn main(self) -> Result<(), Box<dyn std::error::Error>> {
         // Initialize logging.
-        pretty_env_logger::formatted_timed_builder()
-            .filter_module("rudolfs", self.log_level)
-            .init();
+        let mut logger_builder = pretty_env_logger::formatted_timed_builder();
+        logger_builder.filter_module("rudolfs", self.log_level);
+
+        if let Ok(env) = std::env::var("RUST_LOG") {
+            // Support the addition of RUST_LOG to help with debugging
+            // dependencies, such as Hyper.
+            logger_builder.parse_filters(&env);
+        }
+
+        logger_builder.init();
 
         // Find a socket address to bind to. This will resolve domain names.
         let addr = self
