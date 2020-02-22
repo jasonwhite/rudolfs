@@ -105,15 +105,18 @@ impl Backend {
             prefix.pop();
         }
 
-        // `Region::default` will get try to get the region from the environment
-        // and fallback to a default if it isn't found.
-        let mut region = Region::default();
-        if let Ok(endpoint) = std::env::var("AWS_S3_ENDPOINT") {
-            region = Region::Custom {
-                name: region.name().to_owned(),
+        // If a custom endpoint is set, do not use the AWS default (us-east-1)
+        // instead, check environment variables for a region name.
+        let region = if let Ok(endpoint) = std::env::var("AWS_S3_ENDPOINT") {
+            Region::Custom {
+                name: std::env::var("AWS_DEFAULT_REGION")
+                    .or_else(|_| std::env::var("AWS_REGION"))
+                    .unwrap(),
                 endpoint,
             }
-        }
+        } else {
+            Region::default()
+        };
 
         Backend::with_client(S3Client::new(region), bucket, prefix)
     }
