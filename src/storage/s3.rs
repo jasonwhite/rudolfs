@@ -111,7 +111,15 @@ impl Backend {
             Region::Custom {
                 name: std::env::var("AWS_DEFAULT_REGION")
                     .or_else(|_| std::env::var("AWS_REGION"))
-                    .unwrap(),
+                    .unwrap_or_else(|_| {
+                        log::warn!(
+                            "AWS_S3_ENDPOINT was set without \
+                             AWS_DEFAULT_REGION or AWS_REGION being set. \
+                             Defaulting to 'us-east-1', which probably \
+                             doesn't make sense with a custom endpoint."
+                        );
+                        String::from("us-east-1")
+                    }),
                 endpoint,
             }
         } else {

@@ -1,4 +1,5 @@
 max_width = 80
+format_strings = true
 error_on_line_overflow = true
 error_on_unformatted = true
 normalize_comments = true
