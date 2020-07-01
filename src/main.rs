@@ -70,7 +70,7 @@ struct Args {
     s3_prefix: String,
 
     /// Encryption key to use.
-    #[structopt(long = "key", parse(try_from_str = "FromHex::from_hex"))]
+    #[structopt(long = "key", parse(try_from_str = FromHex::from_hex))]
     key: [u8; 32],
 
     /// Maximum size of the cache, in bytes. Set to 0 for an unlimited cache
