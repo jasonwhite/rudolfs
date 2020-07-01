@@ -159,7 +159,7 @@ impl Serialize for Sha256 {
             // Serialize as a hex string.
             let mut hex = String::new();
             self.0
-                .as_ref()
+                .as_slice()
                 .write_hex(&mut hex)
                 .map_err(ser::Error::custom)?;
             serializer.serialize_str(&hex)
@@ -301,12 +301,12 @@ where
                 self.len += bytes.as_ref().len() as u64;
 
                 // Continuously hash the bytes as we receive them.
-                self.hasher.input(bytes.as_ref());
+                self.hasher.update(bytes.as_ref());
 
                 if self.len >= self.total {
                     // This is the last chunk in the stream. Verify that the
                     // digest matches.
-                    let found = Sha256::from(self.hasher.result_reset());
+                    let found = Sha256::from(self.hasher.finalize_reset());
 
                     if found == self.expected {
                         Ok(Async::Ready(Some(bytes)))
