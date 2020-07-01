@@ -25,7 +25,7 @@ generic-array = "0.12"
 hex = "0.3"
 http = "0.1"
 human-size = "0.4"
-humantime = "1"
+humantime = "2"
 hyper = "0.12"
 linked-hash-map = { version = "0.5", features = ["serde_impl"] }
 log = "0.4"
