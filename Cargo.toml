@@ -36,7 +36,7 @@ sha2 = "0.9"
 structopt = "0.3"
 tokio = "0.1"
 url = "1"
-uuid = { version = "0.7", features = ["v4"] }
+uuid = { version = "0.8", features = ["v4"] }
 rand = { version = "0.6", optional = true }
 
 [dependencies.rusoto_core]
