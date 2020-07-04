@@ -19,9 +19,10 @@
 // SOFTWARE.
 use std::sync::Arc;
 
-use futures_backoff::retry;
+use async_trait::async_trait;
+use backoff::{future::FutureOperation, ExponentialBackoff};
 
-use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
+use super::{LFSObject, Storage, StorageKey, StorageStream};
 
 /// Implements retries for certain operations.
 pub struct Backend<S> {
@@ -36,6 +37,7 @@ impl<S> Backend<S> {
     }
 }
 
+#[async_trait]
 impl<S> Storage for Backend<S>
 where
     S: Storage + Send + Sync + 'static,
@@ -43,45 +45,46 @@ where
 {
     type Error = S::Error;
 
-    fn get(
+    async fn get(
         &self,
         key: &StorageKey,
-    ) -> StorageFuture<Option<LFSObject>, Self::Error> {
-        self.storage.get(key)
+    ) -> Result<Option<LFSObject>, Self::Error> {
+        // Due to their streaming nature, this can't be retried by the server.
+        // The client should retry this if it fails.
+        self.storage.get(key).await
     }
 
-    fn put(
+    async fn put(
         &self,
         key: StorageKey,
         value: LFSObject,
-    ) -> StorageFuture<(), Self::Error> {
-        self.storage.put(key, value)
+    ) -> Result<(), Self::Error> {
+        // Due to their streaming nature, this can't be retried by the server.
+        // The client should retry this if it fails.
+        self.storage.put(key, value).await
     }
 
-    fn size(
-        &self,
-        key: &StorageKey,
-    ) -> StorageFuture<Option<u64>, Self::Error> {
-        let key = key.clone();
-        let storage = self.storage.clone();
-        Box::new(retry(move || storage.size(&key)))
+    async fn size(&self, key: &StorageKey) -> Result<Option<u64>, Self::Error> {
+        (|| async { Ok(self.storage.size(&key).await?) })
+            .retry(ExponentialBackoff::default())
+            .await
     }
 
-    fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error> {
-        let key = key.clone();
-        let storage = self.storage.clone();
-        Box::new(retry(move || storage.delete(&key)))
+    async fn delete(&self, key: &StorageKey) -> Result<(), Self::Error> {
+        (|| async { Ok(self.storage.delete(&key).await?) })
+            .retry(ExponentialBackoff::default())
+            .await
     }
 
     fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
         self.storage.list()
     }
 
-    fn total_size(&self) -> Option<u64> {
-        self.storage.total_size()
+    async fn total_size(&self) -> Option<u64> {
+        self.storage.total_size().await
     }
 
-    fn max_size(&self) -> Option<u64> {
-        self.storage.max_size()
+    async fn max_size(&self) -> Option<u64> {
+        self.storage.max_size().await
     }
 }

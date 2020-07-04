@@ -19,11 +19,12 @@
 // SOFTWARE.
 use std::io;
 
+use async_trait::async_trait;
 use derive_more::{Display, From};
 use futures::{try_ready, Async, Future, Poll, Stream};
 use rand::{self, Rng};
 
-use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
+use super::{LFSObject, Storage, StorageKey, StorageStream};
 
 #[derive(Debug, Display, From)]
 enum Error {
@@ -49,6 +50,7 @@ impl<S> Backend<S> {
     }
 }
 
+#[async_trait]
 impl<S> Storage for Backend<S>
 where
     S: Storage + Send + Sync + 'static,
@@ -56,37 +58,34 @@ where
 {
     type Error = S::Error;
 
-    fn get(
+    async fn get(
         &self,
         key: &StorageKey,
-    ) -> StorageFuture<Option<LFSObject>, Self::Error> {
-        Box::new(self.storage.get(key).map(move |obj| -> Option<_> {
+    ) -> Result<Option<LFSObject>, Self::Error> {
+        Box::pin(self.storage.get(key).map(move |obj| -> Option<_> {
             let (len, stream) = obj?.into_parts();
 
-            Some(LFSObject::new(len, Box::new(FaultyStream::new(stream))))
+            Some(LFSObject::new(len, Box::pin(FaultyStream::new(stream))))
         }))
     }
 
-    fn put(
+    async fn put(
         &self,
         key: StorageKey,
         value: LFSObject,
-    ) -> StorageFuture<(), Self::Error> {
+    ) -> Result<(), Self::Error> {
         let (len, stream) = value.into_parts();
 
         let stream = FaultyStream::new(stream);
 
-        self.storage.put(key, LFSObject::new(len, Box::new(stream)))
+        self.storage.put(key, LFSObject::new(len, Box::pin(stream)))
     }
 
-    fn size(
-        &self,
-        key: &StorageKey,
-    ) -> StorageFuture<Option<u64>, Self::Error> {
+    async fn size(&self, key: &StorageKey) -> Result<Option<u64>, Self::Error> {
         self.storage.size(key)
     }
 
-    fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error> {
+    async fn delete(&self, key: &StorageKey) -> Result<(), Self::Error> {
         self.storage.delete(key)
     }
 
@@ -94,12 +93,12 @@ where
         self.storage.list()
     }
 
-    fn total_size(&self) -> Option<u64> {
-        self.storage.total_size()
+    async fn total_size(&self) -> Option<u64> {
+        self.storage.total_size().await
     }
 
-    fn max_size(&self) -> Option<u64> {
-        self.storage.max_size()
+    async fn max_size(&self) -> Option<u64> {
+        self.storage.max_size().await
     }
 }
 

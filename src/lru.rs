@@ -17,9 +17,11 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+use core::marker::Unpin;
+
 use std::hash::Hash;
 
-use futures::{Future, Stream};
+use futures::stream::{TryStream, TryStreamExt};
 use linked_hash_map::LinkedHashMap;
 
 /// A least recently used (LRU) cache.
@@ -54,18 +56,17 @@ where
     /// LRU information. Since the server shouldn't be restarted very often,
     /// this shouldn't be a problem in practice. Frequently used entries will
     /// naturally bubble back up to the top.
-    pub fn from_stream<S>(
-        stream: S,
-    ) -> impl Future<Item = Self, Error = S::Error>
+    pub async fn from_stream<S>(mut stream: S) -> Result<Self, S::Error>
     where
-        S: Stream<Item = (K, u64)>,
+        S: TryStream<Ok = (K, u64)> + Unpin,
     {
-        stream
-            .fold(Cache::new(), move |mut cache, (oid, len)| {
-                cache.push(oid, len);
-                Ok(cache)
-            })
-            .or_else(move |_err| Ok(Cache::new()))
+        let mut cache = Cache::new();
+
+        while let Some((oid, len)) = stream.try_next().await? {
+            cache.push(oid, len);
+        }
+
+        Ok(cache)
     }
 
     /// Removes the least recently used item. Returns `None` if the cache is

@@ -20,15 +20,13 @@
 use std::io;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use derive_more::{Display, From};
-use futures::{
-    future::{self, Either},
-    Future, Stream,
-};
+use futures::stream::TryStreamExt;
 
 use crate::sha256::{Sha256VerifyError, VerifyStream};
 
-use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
+use super::{LFSObject, Storage, StorageKey, StorageStream};
 
 #[derive(Debug, Display, From)]
 enum Error {
@@ -60,6 +58,7 @@ impl<S> Backend<S> {
     }
 }
 
+#[async_trait]
 impl<S> Storage for Backend<S>
 where
     S: Storage + Send + Sync + 'static,
@@ -72,15 +71,11 @@ where
     /// from storage if it is corrupted. If storage backends are composed
     /// correctly, then it should only delete cache storage (not permanent
     /// storage).
-    fn get(
+    async fn get(
         &self,
         key: &StorageKey,
-    ) -> StorageFuture<Option<LFSObject>, Self::Error> {
-        let key = key.clone();
-
-        let storage = self.storage.clone();
-
-        Box::new(self.storage.get(&key).map(move |obj| match obj {
+    ) -> Result<Option<LFSObject>, Self::Error> {
+        match self.storage.get(key).await? {
             Some(obj) => {
                 let (len, stream) = obj.into_parts();
 
@@ -88,36 +83,48 @@ where
                     stream.map_err(Error::from),
                     len,
                     *key.oid(),
-                )
-                .or_else(move |err| match err {
-                    Error::Verify(err) => {
-                        log::error!(
-                            "Deleting corrupted object {} ({})",
-                            key.oid(),
-                            err
-                        );
+                );
 
-                        Either::A(storage.delete(&key).then(|_| {
-                            Err(io::Error::new(
+                let key = key.clone();
+                let storage = self.storage.clone();
+
+                let stream = stream.map_err(move |err| {
+                    match err {
+                        Error::Verify(err) => {
+                            log::error!(
+                                "Found corrupted object {} ({})",
+                                key.oid(),
+                                err
+                            );
+
+                            let storage = storage.clone();
+                            let key = key.clone();
+
+                            // Delete the corrupted object from storage.
+                            tokio::spawn(
+                                async move { storage.delete(&key).await },
+                            );
+
+                            io::Error::new(
                                 io::ErrorKind::Other,
                                 "found corrupted object",
-                            ))
-                        }))
+                            )
+                        }
+                        Error::Io(err) => err,
                     }
-                    Error::Io(err) => Either::B(future::err(err)),
                 });
 
-                Some(LFSObject::new(len, Box::new(stream)))
+                Ok(Some(LFSObject::new(len, Box::pin(stream))))
             }
-            None => None,
-        }))
+            None => Ok(None),
+        }
     }
 
-    fn put(
+    async fn put(
         &self,
         key: StorageKey,
         value: LFSObject,
-    ) -> StorageFuture<(), Self::Error> {
+    ) -> Result<(), Self::Error> {
         let (len, stream) = value.into_parts();
 
         let stream =
@@ -129,29 +136,28 @@ where
                     Error::Io(err) => io::Error::new(io::ErrorKind::Other, err),
                 });
 
-        self.storage.put(key, LFSObject::new(len, Box::new(stream)))
+        self.storage
+            .put(key, LFSObject::new(len, Box::pin(stream)))
+            .await
     }
 
-    fn size(
-        &self,
-        key: &StorageKey,
-    ) -> StorageFuture<Option<u64>, Self::Error> {
-        self.storage.size(key)
+    async fn size(&self, key: &StorageKey) -> Result<Option<u64>, Self::Error> {
+        self.storage.size(key).await
     }
 
-    fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error> {
-        self.storage.delete(key)
+    async fn delete(&self, key: &StorageKey) -> Result<(), Self::Error> {
+        self.storage.delete(key).await
     }
 
     fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
         self.storage.list()
     }
 
-    fn total_size(&self) -> Option<u64> {
-        self.storage.total_size()
+    async fn total_size(&self) -> Option<u64> {
+        self.storage.total_size().await
     }
 
-    fn max_size(&self) -> Option<u64> {
-        self.storage.max_size()
+    async fn max_size(&self) -> Option<u64> {
+        self.storage.max_size().await
     }
 }

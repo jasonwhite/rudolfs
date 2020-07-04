@@ -35,24 +35,31 @@ pub use retrying::Backend as Retrying;
 pub use s3::{Backend as S3, Error as S3Error};
 pub use verify::Backend as Verify;
 
-use std::fmt;
-
-use bytes::Bytes;
-use std::io;
-
 use crate::lfs::Oid;
-use futures::{sync::mpsc, Future, Sink, Stream};
+
+use std::fmt;
+use std::io;
+use std::pin::Pin;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use bytes::Bytes;
+use futures::{
+    channel::mpsc,
+    sink::SinkExt,
+    stream::{BoxStream, Stream, StreamExt},
+    Future,
+};
 
 pub type S3DiskCache = Cached<Disk, S3>;
 
-/// Future returned by storage operations.
-pub type StorageFuture<T, E> = Box<dyn Future<Item = T, Error = E> + Send>;
-
 /// Stream returned by storage operations.
-pub type StorageStream<T, E> = Box<dyn Stream<Item = T, Error = E> + Send>;
+pub type StorageStream<T, E> = BoxStream<'static, Result<T, E>>;
 
 /// The byte stream of an LFS object.
-pub type ByteStream = Box<dyn Stream<Item = Bytes, Error = io::Error> + Send>;
+pub type ByteStream = Pin<
+    Box<dyn Stream<Item = Result<Bytes, io::Error>> + Send + Sync + 'static>,
+>;
 
 /// A namespace is used to categorize stored LFS objects. The storage
 /// implementation is free to ignore this. However, it can be useful when
@@ -70,7 +77,7 @@ impl Namespace {
     }
 
     #[allow(unused)]
-    pub fn split(self) -> (String, String) {
+    pub fn into_parts(self) -> (String, String) {
         (self.org, self.project)
     }
 
@@ -153,64 +160,60 @@ impl LFSObject {
     /// to a client.
     pub fn fanout(
         self,
-    ) -> (impl Future<Item = (), Error = io::Error>, Self, Self) {
+    ) -> (impl Future<Output = Result<(), io::Error>>, Self, Self) {
         let (len, stream) = self.into_parts();
 
-        let (sender_a, receiver_a) = mpsc::channel(0);
-        let (sender_b, receiver_b) = mpsc::channel(0);
+        let (sender_a, receiver_a) = mpsc::channel::<Bytes>(0);
+        let (sender_b, receiver_b) = mpsc::channel::<Bytes>(0);
 
         let sink = sender_a
             .fanout(sender_b)
             .sink_map_err(|e| io::Error::new(io::ErrorKind::Other, e));
 
-        let receiver_a = receiver_a.map_err(|()| {
-            io::Error::new(io::ErrorKind::Other, "failed receiving byte stream")
-        });
-        let receiver_b = receiver_b.map_err(|()| {
-            io::Error::new(io::ErrorKind::Other, "failed receiving byte stream")
-        });
+        let receiver_a = receiver_a.map(|x| -> io::Result<_> { Ok(x) });
+        let receiver_b = receiver_b.map(|x| -> io::Result<_> { Ok(x) });
 
-        let f = stream.forward(sink).map(|_| ());
-        let a = LFSObject::new(len, Box::new(receiver_a));
-        let b = LFSObject::new(len, Box::new(receiver_b));
+        let f = stream.forward(sink);
+        let a = LFSObject::new(len, Box::pin(receiver_a));
+        let b = LFSObject::new(len, Box::pin(receiver_b));
 
         (f, a, b)
     }
 }
 
 /// Trait for abstracting away the storage medium.
+#[async_trait]
 pub trait Storage {
     type Error: fmt::Display + Send;
 
     /// Gets an entry from the storage medium.
-    fn get(
+    async fn get(
         &self,
         key: &StorageKey,
-    ) -> StorageFuture<Option<LFSObject>, Self::Error>;
+    ) -> Result<Option<LFSObject>, Self::Error>;
 
     /// Sets an entry in the storage medium.
-    fn put(
+    async fn put(
         &self,
         key: StorageKey,
         value: LFSObject,
-    ) -> StorageFuture<(), Self::Error>;
+    ) -> Result<(), Self::Error>;
 
     /// Gets the size of the object. Returns `None` if the object does not
     /// exist.
-    fn size(&self, key: &StorageKey)
-        -> StorageFuture<Option<u64>, Self::Error>;
+    async fn size(&self, key: &StorageKey) -> Result<Option<u64>, Self::Error>;
 
     /// Deletes an object.
     ///
     /// Permanent storage backends may choose to never delete objects, always
     /// returning success.
-    fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error>;
+    async fn delete(&self, key: &StorageKey) -> Result<(), Self::Error>;
 
     /// Returns a stream of all the object IDs in the storage medium.
     fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error>;
 
     /// Gets the total size of the storage, if known.
-    fn total_size(&self) -> Option<u64> {
+    async fn total_size(&self) -> Option<u64> {
         None
     }
 
@@ -218,52 +221,57 @@ pub trait Storage {
     ///
     /// This should return `None` if the storage size is unbounded. This is only
     /// applicable to caches.
-    fn max_size(&self) -> Option<u64> {
+    async fn max_size(&self) -> Option<u64> {
         None
     }
 }
 
-impl<S> Storage for Box<S>
+#[async_trait]
+impl<S> Storage for Arc<S>
 where
-    S: Storage + ?Sized,
+    S: Storage + Send + Sync,
 {
     type Error = S::Error;
 
-    fn get(
+    #[inline]
+    async fn get(
         &self,
         key: &StorageKey,
-    ) -> StorageFuture<Option<LFSObject>, Self::Error> {
-        (**self).get(key)
+    ) -> Result<Option<LFSObject>, Self::Error> {
+        self.as_ref().get(key).await
     }
 
-    fn put(
+    #[inline]
+    async fn put(
         &self,
         key: StorageKey,
         value: LFSObject,
-    ) -> StorageFuture<(), Self::Error> {
-        (**self).put(key, value)
+    ) -> Result<(), Self::Error> {
+        self.as_ref().put(key, value).await
     }
 
-    fn size(
-        &self,
-        key: &StorageKey,
-    ) -> StorageFuture<Option<u64>, Self::Error> {
-        (**self).size(key)
+    #[inline]
+    async fn size(&self, key: &StorageKey) -> Result<Option<u64>, Self::Error> {
+        self.as_ref().size(key).await
     }
 
-    fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error> {
-        (**self).delete(key)
+    #[inline]
+    async fn delete(&self, key: &StorageKey) -> Result<(), Self::Error> {
+        self.as_ref().delete(key).await
     }
 
+    #[inline]
     fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
-        (**self).list()
+        self.as_ref().list()
     }
 
-    fn total_size(&self) -> Option<u64> {
-        (**self).total_size()
+    #[inline]
+    async fn total_size(&self) -> Option<u64> {
+        self.as_ref().total_size().await
     }
 
-    fn max_size(&self) -> Option<u64> {
-        (**self).max_size()
+    #[inline]
+    async fn max_size(&self) -> Option<u64> {
+        self.as_ref().max_size().await
     }
 }

@@ -20,10 +20,11 @@
 use chacha::{ChaCha, KeyStream};
 use std::io;
 
+use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
-use futures::{Future, Stream};
+use futures::{stream::StreamExt, Stream};
 
-use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
+use super::{LFSObject, Storage, StorageKey, StorageStream};
 
 /// A storage adaptor that encrypts/decrypts all data that passes through.
 pub struct Backend<S> {
@@ -40,12 +41,12 @@ impl<S> Backend<S> {
 fn xor_stream<S>(
     mut chacha: ChaCha,
     stream: S,
-) -> impl Stream<Item = Bytes, Error = io::Error>
+) -> impl Stream<Item = Result<Bytes, io::Error>>
 where
-    S: Stream<Item = Bytes, Error = io::Error>,
+    S: Stream<Item = Result<Bytes, io::Error>>,
 {
-    stream.and_then(move |bytes| {
-        let mut bytes = BytesMut::from(bytes);
+    stream.map(move |bytes| {
+        let mut bytes = BytesMut::from(bytes?.as_ref());
 
         chacha.xor_read(bytes.as_mut()).map_err(|_| {
             io::Error::new(
@@ -58,6 +59,7 @@ where
     })
 }
 
+#[async_trait]
 impl<S> Storage for Backend<S>
 where
     S: Storage + Send + Sync + 'static,
@@ -65,33 +67,27 @@ where
 {
     type Error = S::Error;
 
-    fn get(
+    async fn get(
         &self,
         key: &StorageKey,
-    ) -> StorageFuture<Option<LFSObject>, Self::Error> {
+    ) -> Result<Option<LFSObject>, Self::Error> {
         // Use the first part of the SHA256 as the nonce.
         let mut nonce: [u8; 24] = [0; 24];
         nonce.copy_from_slice(&key.oid().bytes()[0..24]);
 
         let chacha = ChaCha::new_xchacha20(&self.key, &nonce);
 
-        Box::new(self.storage.get(key).and_then(move |obj| match obj {
-            Some(obj) => {
-                let (len, stream) = obj.into_parts();
-                Ok(Some(LFSObject::new(
-                    len,
-                    Box::new(xor_stream(chacha, stream)),
-                )))
-            }
-            None => Ok(None),
+        Ok(self.storage.get(key).await?.map(move |obj| {
+            let (len, stream) = obj.into_parts();
+            LFSObject::new(len, Box::pin(xor_stream(chacha, stream)))
         }))
     }
 
-    fn put(
+    async fn put(
         &self,
         key: StorageKey,
         value: LFSObject,
-    ) -> StorageFuture<(), Self::Error> {
+    ) -> Result<(), Self::Error> {
         // Use the first part of the SHA256 as the nonce.
         let mut nonce: [u8; 24] = [0; 24];
         nonce.copy_from_slice(&key.oid().bytes()[0..24]);
@@ -101,29 +97,28 @@ where
         let (len, stream) = value.into_parts();
         let stream = xor_stream(chacha, stream);
 
-        self.storage.put(key, LFSObject::new(len, Box::new(stream)))
+        self.storage
+            .put(key, LFSObject::new(len, Box::pin(stream)))
+            .await
     }
 
-    fn size(
-        &self,
-        key: &StorageKey,
-    ) -> StorageFuture<Option<u64>, Self::Error> {
-        self.storage.size(key)
+    async fn size(&self, key: &StorageKey) -> Result<Option<u64>, Self::Error> {
+        self.storage.size(key).await
     }
 
-    fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error> {
-        self.storage.delete(key)
+    async fn delete(&self, key: &StorageKey) -> Result<(), Self::Error> {
+        self.storage.delete(key).await
     }
 
     fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
         self.storage.list()
     }
 
-    fn total_size(&self) -> Option<u64> {
-        self.storage.total_size()
+    async fn total_size(&self) -> Option<u64> {
+        self.storage.total_size().await
     }
 
-    fn max_size(&self) -> Option<u64> {
-        self.storage.max_size()
+    async fn max_size(&self) -> Option<u64> {
+        self.storage.max_size().await
     }
 }

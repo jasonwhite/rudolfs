@@ -17,11 +17,14 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+use core::pin::Pin;
+use core::task::{Context, Poll};
+
 use std::fmt;
 use std::ops;
 use std::str::FromStr;
 
-use futures::{try_ready, Async, Poll, Stream};
+use futures::{ready, Stream};
 use hex::{FromHex, FromHexError, ToHex};
 use serde::{
     de::{self, Deserializer, Visitor},
@@ -267,12 +270,7 @@ pub struct VerifyStream<S> {
     hasher: sha2::Sha256,
 }
 
-impl<S> VerifyStream<S>
-where
-    S: Stream,
-    S::Item: AsRef<[u8]>,
-    S::Error: From<Sha256VerifyError>,
-{
+impl<S> VerifyStream<S> {
     pub fn new(stream: S, total: u64, expected: Sha256) -> Self {
         VerifyStream {
             stream,
@@ -284,45 +282,48 @@ where
     }
 }
 
-impl<S> Stream for VerifyStream<S>
+impl<S, T, E> Stream for VerifyStream<S>
 where
-    S: Stream,
-    S::Item: AsRef<[u8]>,
-    S::Error: From<Sha256VerifyError>,
+    S: Stream<Item = Result<T, E>> + Unpin,
+    T: AsRef<[u8]>,
+    E: From<Sha256VerifyError>,
 {
     type Item = S::Item;
-    type Error = S::Error;
 
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        let bytes = try_ready!(self.stream.poll());
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+    ) -> Poll<Option<Self::Item>> {
+        match ready!(Stream::poll_next(Pin::new(&mut self.stream), cx)) {
+            Some(bytes) => match bytes {
+                Ok(bytes) => {
+                    self.len += bytes.as_ref().len() as u64;
 
-        match bytes {
-            Some(bytes) => {
-                self.len += bytes.as_ref().len() as u64;
+                    // Continuously hash the bytes as we receive them.
+                    self.hasher.update(bytes.as_ref());
 
-                // Continuously hash the bytes as we receive them.
-                self.hasher.update(bytes.as_ref());
+                    if self.len >= self.total {
+                        // This is the last chunk in the stream. Verify that the
+                        // digest matches.
+                        let found = Sha256::from(self.hasher.finalize_reset());
 
-                if self.len >= self.total {
-                    // This is the last chunk in the stream. Verify that the
-                    // digest matches.
-                    let found = Sha256::from(self.hasher.finalize_reset());
-
-                    if found == self.expected {
-                        Ok(Async::Ready(Some(bytes)))
+                        if found == self.expected {
+                            Poll::Ready(Some(Ok(bytes)))
+                        } else {
+                            Poll::Ready(Some(Err(E::from(Sha256VerifyError {
+                                found,
+                                expected: self.expected,
+                            }))))
+                        }
                     } else {
-                        Err(Self::Error::from(Sha256VerifyError {
-                            found,
-                            expected: self.expected,
-                        }))
+                        Poll::Ready(Some(Ok(bytes)))
                     }
-                } else {
-                    Ok(Async::Ready(Some(bytes)))
                 }
-            }
+                Err(err) => Poll::Ready(Some(Err(err))),
+            },
             None => {
                 // End of stream.
-                Ok(Async::Ready(None))
+                Poll::Ready(None)
             }
         }
     }

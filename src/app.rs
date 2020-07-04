@@ -19,20 +19,43 @@
 // SOFTWARE.
 use std::fmt;
 use std::io;
-use std::sync::Arc;
+
+use core::task::{Context, Poll};
 
 use askama::Template;
 use futures::{
-    future::{self, Either},
-    Future, IntoFuture, Stream,
+    future::{self, BoxFuture},
+    stream::TryStreamExt,
 };
 use http::{self, header, StatusCode, Uri};
-use hyper::{self, service::Service, Chunk, Method, Request, Response};
+use hyper::{self, service::Service, Body, Method, Request, Response};
+use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
-use crate::hyperext::{into_request, Body, IntoResponse, RequestExt};
+use crate::hyperext::RequestExt;
 use crate::lfs;
 use crate::storage::{LFSObject, Namespace, Storage, StorageKey};
+
+async fn from_json<T>(mut body: Body) -> Result<T, Error>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    let mut buf = Vec::new();
+
+    while let Some(chunk) = body.try_next().await? {
+        buf.extend(chunk);
+    }
+
+    Ok(serde_json::from_slice(&buf)?)
+}
+
+fn into_json<T>(value: &T) -> Result<Body, Error>
+where
+    T: Serialize,
+{
+    let bytes = serde_json::to_vec_pretty(value)?;
+    Ok(bytes.into())
+}
 
 #[derive(Template)]
 #[template(path = "index.html")]
@@ -41,21 +64,9 @@ struct IndexTemplate<'a> {
     api: Uri,
 }
 
-/// Shared state for all instances of the `App` service.
-pub struct State<S> {
-    // Storage backend.
-    storage: S,
-}
-
-impl<S> State<S> {
-    pub fn new(storage: S) -> Self {
-        State { storage }
-    }
-}
-
 #[derive(Clone)]
 pub struct App<S> {
-    state: Arc<State<S>>,
+    storage: S,
 }
 
 impl<S> App<S>
@@ -64,12 +75,12 @@ where
     S::Error: Into<Error> + 'static,
     Error: From<S::Error>,
 {
-    pub fn new(state: Arc<State<S>>) -> Self {
-        App { state }
+    pub fn new(storage: S) -> Self {
+        App { storage }
     }
 
     /// Handles the index route.
-    fn index(&mut self, req: Request<Body>) -> Result<Response<Body>, Error> {
+    fn index(req: Request<Body>) -> Result<Response<Body>, Error> {
         let template = IndexTemplate {
             title: "Rudolfs",
             api: req.base_uri().path_and_query("/api").build().unwrap(),
@@ -81,20 +92,17 @@ where
     }
 
     /// Generates a "404 not found" response.
-    fn not_found(
-        &mut self,
-        _req: Request<Body>,
-    ) -> Result<Response<Body>, Error> {
+    fn not_found(_req: Request<Body>) -> Result<Response<Body>, Error> {
         Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body("Not found".into())?)
     }
 
     /// Handles `/api` routes.
-    fn api(
-        &mut self,
+    async fn api(
+        storage: S,
         req: Request<Body>,
-    ) -> impl Future<Item = Response<Body>, Error = Error> {
+    ) -> Result<Response<Body>, Error> {
         let mut parts = req.uri().path().split('/').filter(|s| !s.is_empty());
 
         // Skip over the '/api' part.
@@ -106,11 +114,9 @@ where
                 Namespace::new(org.into(), project.into())
             }
             _ => {
-                return Response::builder()
+                return Ok(Response::builder()
                     .status(StatusCode::BAD_REQUEST)
-                    .body(Body::from("Missing org/project in URL"))
-                    .map_err(Into::into)
-                    .response();
+                    .body(Body::from("Missing org/project in URL"))?)
             }
         };
 
@@ -121,69 +127,58 @@ where
                 let oid = match oid {
                     Some(oid) => oid,
                     None => {
-                        return Response::builder()
+                        return Ok(Response::builder()
                             .status(StatusCode::BAD_REQUEST)
-                            .body(Body::from("Missing OID parameter."))
-                            .map_err(Into::into)
-                            .response();
+                            .body(Body::from("Missing OID parameter."))?)
                     }
                 };
 
                 let key = StorageKey::new(namespace, oid);
 
                 match *req.method() {
-                    Method::GET => self.download(req, key).response(),
-                    Method::PUT => self.upload(req, key).response(),
-                    _ => self.not_found(req).response(),
+                    Method::GET => Self::download(storage, req, key).await,
+                    Method::PUT => Self::upload(storage, req, key).await,
+                    _ => Self::not_found(req),
                 }
             }
             Some("objects") => match (req.method(), parts.next()) {
                 (&Method::POST, Some("batch")) => {
-                    self.batch(req, namespace).response()
+                    Self::batch(storage, req, namespace).await
                 }
                 (&Method::POST, Some("verify")) => {
-                    self.verify(req, namespace).response()
+                    Self::verify(storage, req, namespace).await
                 }
-                _ => self.not_found(req).response(),
+                _ => Self::not_found(req),
             },
-            _ => self.not_found(req).response(),
+            _ => Self::not_found(req),
         }
     }
 
     /// Downloads a single LFS object.
-    fn download(
-        &mut self,
+    async fn download(
+        storage: S,
         _req: Request<Body>,
         key: StorageKey,
-    ) -> impl Future<Item = Response<Body>, Error = Error> {
-        self.state.storage.get(&key).from_err::<Error>().and_then(
-            move |object| -> Result<_, Error> {
-                if let Some(object) = object {
-                    Response::builder()
-                        .status(StatusCode::OK)
-                        .header(
-                            header::CONTENT_TYPE,
-                            "application/octet-stream",
-                        )
-                        .header(header::CONTENT_LENGTH, object.len())
-                        .body(Body::wrap_stream(object.stream()))
-                        .map_err(Into::into)
-                } else {
-                    Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body(Body::empty())
-                        .map_err(Into::into)
-                }
-            },
-        )
+    ) -> Result<Response<Body>, Error> {
+        if let Some(object) = storage.get(&key).await? {
+            Ok(Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .header(header::CONTENT_LENGTH, object.len())
+                .body(Body::wrap_stream(object.stream()))?)
+        } else {
+            Ok(Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::empty())?)
+        }
     }
 
     /// Uploads a single LFS object.
-    fn upload(
-        &mut self,
+    async fn upload(
+        storage: S,
         req: Request<Body>,
         key: StorageKey,
-    ) -> <Self as Service>::Future {
+    ) -> Result<Response<Body>, Error> {
         let len = req
             .headers()
             .get("Content-Length")
@@ -193,150 +188,105 @@ where
         let len = match len {
             Some(len) => len,
             None => {
-                return Box::new(
-                    Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .body(Body::from("Invalid Content-Length header."))
-                        .map_err(Into::into)
-                        .into_future(),
-                );
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from("Invalid Content-Length header."))
+                    .map_err(Into::into);
             }
         };
 
         // Verify the SHA256 of the uploaded object as it is being uploaded.
         let stream = req
             .into_body()
-            .map(Chunk::into_bytes)
-            .from_err::<Error>()
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
 
-        let object = LFSObject::new(len, Box::new(stream));
+        let object = LFSObject::new(len, Box::pin(stream));
 
-        Box::new(
-            self.state
-                .storage
-                .put(key, object)
-                .from_err::<Error>()
-                .and_then(|_| {
-                    Response::builder()
-                        .status(StatusCode::OK)
-                        .body(Body::empty())
-                        .map_err(Into::into)
-                }),
-        )
+        storage.put(key, object).await?;
+
+        Ok(Response::builder()
+            .status(StatusCode::OK)
+            .body(Body::empty())?)
     }
 
     /// Verifies that an LFS object exists on the server.
-    fn verify(
-        &mut self,
+    async fn verify(
+        storage: S,
         req: Request<Body>,
         namespace: Namespace,
-    ) -> impl Future<Item = Response<Body>, Error = Error> {
-        let state = self.state.clone();
+    ) -> Result<Response<Body>, Error> {
+        let val: lfs::VerifyRequest = from_json(req.into_body()).await?;
+        let key = StorageKey::new(namespace, val.oid);
 
-        req.into_body()
-            .into_json()
-            .and_then(move |val: lfs::VerifyRequest| {
-                let key = StorageKey::new(namespace, val.oid);
+        if let Some(size) = storage.size(&key).await? {
+            if size == val.size {
+                return Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Body::empty())?);
+            }
+        }
 
-                state.storage.size(&key).from_err::<Error>().and_then(
-                    move |size| {
-                        if let Some(size) = size {
-                            if size == val.size {
-                                return Response::builder()
-                                    .status(StatusCode::OK)
-                                    .body(Body::empty())
-                                    .map_err(Into::into);
-                            }
-                        }
-
-                        // Object doesn't exist or the size is incorrect.
-                        Response::builder()
-                            .status(StatusCode::NOT_FOUND)
-                            .body(Body::empty())
-                            .map_err(Into::into)
-                    },
-                )
-            })
+        // Object doesn't exist or the size is incorrect.
+        Ok(Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())?)
     }
 
     /// Batch API endpoint for the Git LFS server spec.
     ///
     /// See also:
     /// https://github.com/git-lfs/git-lfs/blob/master/docs/api/batch.md
-    fn batch(
-        &mut self,
+    async fn batch(
+        storage: S,
         req: Request<Body>,
         namespace: Namespace,
-    ) -> impl Future<Item = Response<Body>, Error = Error> {
+    ) -> Result<Response<Body>, Error> {
         // Get the host name and scheme.
         let uri = req.base_uri().path_and_query("/").build().unwrap();
 
-        let state = self.state.clone();
+        match from_json::<lfs::BatchRequest>(req.into_body()).await {
+            Ok(val) => {
+                let operation = val.operation;
 
-        req.into_body().into_json().then(
-            move |result: Result<lfs::BatchRequest, _>| {
-                match result {
-                    Ok(val) => {
-                        let operation = val.operation;
+                // For each object, check if it exists in the storage
+                // backend.
+                let objects = val.objects.into_iter().map(|object| {
+                    let uri = uri.clone();
+                    let key = StorageKey::new(namespace.clone(), object.oid);
 
-                        // For each object, check if it exists in the storage
-                        // backend.
-                        let objects =
-                            val.objects.into_iter().map(move |object| {
-                                let uri = uri.clone();
+                    async {
+                        let size = storage.size(&key).await;
 
-                                let key = StorageKey::new(
-                                    namespace.clone(),
-                                    object.oid,
-                                );
-
-                                state.storage.size(&key).then(move |size| {
-                                    let (namespace, _) = key.into_parts();
-                                    Ok(basic_response(
-                                        uri, object, operation, size, namespace,
-                                    ))
-                                })
-                            });
-
-                        Either::A(
-                            future::join_all(objects)
-                                .from_err::<Error>()
-                                .and_then(|objects| {
-                                    let response = lfs::BatchResponse {
-                                        transfer: Some(lfs::Transfer::Basic),
-                                        objects,
-                                    };
-
-                                    Response::builder()
-                                        .status(StatusCode::OK)
-                                        .header(
-                                            header::CONTENT_TYPE,
-                                            "application/json",
-                                        )
-                                        .body(Body::json(&response)?)
-                                        .map_err(Into::into)
-                                }),
-                        )
+                        let (namespace, _) = key.into_parts();
+                        Ok(basic_response(
+                            uri, object, operation, size, namespace,
+                        ))
                     }
-                    Err(err) => {
-                        let response = lfs::BatchResponseError {
-                            message: err.to_string(),
-                            documentation_url: None,
-                            request_id: None,
-                        };
+                });
 
-                        Either::B(
-                            Response::builder()
-                                .status(StatusCode::BAD_REQUEST)
-                                .body(Body::json(&response).unwrap())
-                                .map_err(Into::into)
-                                .into_future(),
-                        )
-                    }
-                }
-            },
-        )
+                let objects = future::try_join_all(objects).await?;
+                let response = lfs::BatchResponse {
+                    transfer: Some(lfs::Transfer::Basic),
+                    objects,
+                };
+
+                Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(into_json(&response)?)?)
+            }
+            Err(err) => {
+                let response = lfs::BatchResponseError {
+                    message: err.to_string(),
+                    documentation_url: None,
+                    request_id: None,
+                };
+
+                Ok(Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(into_json(&response).unwrap())?)
+            }
+        }
     }
 }
 
@@ -423,7 +373,7 @@ where
                     authenticated: Some(true),
                     actions: Some(lfs::Actions {
                         download: None,
-                        upload: Some(action.clone()),
+                        upload: Some(action),
                         verify: Some(lfs::Action {
                             href: format!(
                                 "{}api/{}/objects/verify",
@@ -467,32 +417,30 @@ where
     }
 }
 
-impl<S> Service for App<S>
+impl<S> Service<Request<Body>> for App<S>
 where
-    S: Storage + Send + Sync + 'static,
+    S: Storage + Clone + Send + Sync + 'static,
     S::Error: Into<Error> + 'static,
     Error: From<S::Error>,
 {
-    type ReqBody = hyper::Body;
-    type ResBody = Body;
+    type Response = Response<Body>;
     type Error = Error;
-    type Future = Box<dyn Future<Item = Response<Body>, Error = Error> + Send>;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn call(&mut self, req: Request<Self::ReqBody>) -> Self::Future {
-        let req = into_request(req);
+    fn poll_ready(
+        &mut self,
+        _cx: &mut Context,
+    ) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
 
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
         if req.uri().path() == "/" {
-            return self.index(req).response();
+            Box::pin(future::ready(Self::index(req)))
+        } else if req.uri().path().starts_with("/api/") {
+            Box::pin(Self::api(self.storage.clone(), req))
+        } else {
+            Box::pin(future::ready(Self::not_found(req)))
         }
-
-        if req.uri().path().starts_with("/api/") {
-            return self.api(req).response();
-        }
-
-        Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::empty())
-            .map_err(Into::into)
-            .response()
     }
 }
