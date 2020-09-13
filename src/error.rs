@@ -19,11 +19,7 @@
 // SOFTWARE.
 use std::io;
 
-use askama;
 use derive_more::{Display, From};
-use http;
-use hyper;
-use serde_json;
 
 use crate::sha256::{Sha256Error, Sha256VerifyError};
 use crate::storage::{self, Storage};

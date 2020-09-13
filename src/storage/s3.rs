@@ -17,12 +17,12 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+use async_trait::async_trait;
+use backoff::{future::FutureOperation, ExponentialBackoff};
 use bytes::Bytes;
 use derive_more::{Display, From};
-use futures::{future, stream, Future, Stream};
-use futures_backoff::retry;
+use futures::{stream, stream::TryStreamExt};
 use http::StatusCode;
-use log;
 use rusoto_core::{Region, RusotoError};
 use rusoto_s3::{
     GetObjectError, GetObjectRequest, HeadBucketError, HeadBucketRequest,
@@ -30,7 +30,7 @@ use rusoto_s3::{
     S3Client, StreamingBody, S3,
 };
 
-use super::{LFSObject, Storage, StorageFuture, StorageKey, StorageStream};
+use super::{LFSObject, Storage, StorageKey, StorageStream};
 
 #[derive(Debug, From, Display)]
 pub enum Error {
@@ -57,6 +57,20 @@ pub enum InitError {
 
     #[display(fmt = "{}", _0)]
     Other(String),
+}
+
+impl InitError {
+    /// Converts the initialization error into an backoff error. Useful for not
+    /// retrying certain errors.
+    pub fn into_backoff(self) -> backoff::Error<InitError> {
+        // Certain types of errors should never be retried.
+        match self {
+            InitError::Bucket | InitError::Credentials => {
+                backoff::Error::Permanent(self)
+            }
+            _ => backoff::Error::Transient(self),
+        }
+    }
 }
 
 impl From<RusotoError<HeadBucketError>> for InitError {
@@ -96,67 +110,79 @@ pub struct Backend<C = S3Client> {
 }
 
 impl Backend {
-    pub fn new(
+    pub async fn new(
         bucket: String,
         mut prefix: String,
-    ) -> impl Future<Item = Self, Error = Error> {
+    ) -> Result<Self, Error> {
         // Ensure the prefix doesn't end with a '/'.
         while prefix.ends_with('/') {
             prefix.pop();
         }
 
-        // If a custom endpoint is set, do not use the AWS default (us-east-1)
-        // instead, check environment variables for a region name.
         let region = if let Ok(endpoint) = std::env::var("AWS_S3_ENDPOINT") {
-            Region::Custom {
-                name: std::env::var("AWS_DEFAULT_REGION")
-                    .or_else(|_| std::env::var("AWS_REGION"))
-                    .unwrap_or_else(|_| {
-                        log::warn!(
-                            "AWS_S3_ENDPOINT was set without \
-                             AWS_DEFAULT_REGION or AWS_REGION being set. \
-                             Defaulting to 'us-east-1', which probably \
-                             doesn't make sense with a custom endpoint."
-                        );
-                        String::from("us-east-1")
-                    }),
-                endpoint,
-            }
+            // If a custom endpoint is set, do not use the AWS default
+            // (us-east-1). Instead, check environment variables for a region
+            // name.
+            let name = std::env::var("AWS_DEFAULT_REGION")
+                .or_else(|_| std::env::var("AWS_REGION"))
+                .map_err(|_| {
+                    InitError::Other(
+                        "$AWS_S3_ENDPOINT was set without $AWS_DEFAULT_REGION \
+                         or $AWS_REGION being set. Custom endpoints don't \
+                         make sense without also setting a region."
+                            .into(),
+                    )
+                })?;
+
+            Region::Custom { name, endpoint }
         } else {
             Region::default()
         };
 
-        Backend::with_client(S3Client::new(region), bucket, prefix)
+        log::info!(
+            "Connecting to S3 bucket '{}' at region '{}'",
+            bucket,
+            region.name()
+        );
+
+        Backend::with_client(S3Client::new(region), bucket, prefix).await
     }
 }
 
 impl<C> Backend<C> {
-    pub fn with_client(
+    pub async fn with_client(
         client: C,
         bucket: String,
         prefix: String,
-    ) -> impl Future<Item = Self, Error = Error>
+    ) -> Result<Self, Error>
     where
         C: S3 + Clone,
     {
         // Perform a HEAD operation to check that the bucket exists and that
-        // our credentials work. This helps catch very common
-        // errors early on application startup.
+        // our credentials work. This helps catch very common errors early on
+        // in application startup.
         let req = HeadBucketRequest {
             bucket: bucket.clone(),
         };
 
         let c = client.clone();
 
-        retry(move || {
-            c.head_bucket(req.clone()).map_err(|e| {
-                log::error!("Failed to query S3 bucket ('{}'). Retrying...", e);
-                e
-            })
+        // We need to retry here so that any fake S3 services have a chance to
+        // start up alongside Rudolfs.
+        (|| async {
+            // Note that we don't retry certain failures, like credential or
+            // missing bucket errors. These are unlikely to be transient errors.
+            c.head_bucket(req.clone())
+                .await
+                .map_err(InitError::from)
+                .map_err(InitError::into_backoff)
         })
-        .map_err(InitError::from)
-        .from_err()
-        .map(move |()| Backend {
+        .retry(ExponentialBackoff::default())
+        .await?;
+
+        log::info!("Successfully authorized with AWS");
+
+        Ok(Backend {
             client,
             bucket,
             prefix,
@@ -168,16 +194,17 @@ impl<C> Backend<C> {
     }
 }
 
+#[async_trait]
 impl<C> Storage for Backend<C>
 where
-    C: S3,
+    C: S3 + Send + Sync,
 {
     type Error = Error;
 
-    fn get(
+    async fn get(
         &self,
         key: &StorageKey,
-    ) -> StorageFuture<Option<LFSObject>, Self::Error> {
+    ) -> Result<Option<LFSObject>, Self::Error> {
         let request = GetObjectRequest {
             bucket: self.bucket.clone(),
             key: self.key_to_path(key),
@@ -185,34 +212,21 @@ where
             ..Default::default()
         };
 
-        Box::new(
-            self.client
-                .get_object(request)
-                .then(move |result| match result {
-                    Ok(object) => Ok(Some(LFSObject::new(
-                        object.content_length.unwrap() as u64,
-                        Box::new(object.body.unwrap().map(Bytes::from)),
-                    ))),
-                    Err(err) => {
-                        if let RusotoError::Service(
-                            GetObjectError::NoSuchKey(_),
-                        ) = &err
-                        {
-                            Ok(None)
-                        } else {
-                            Err(err)
-                        }
-                    }
-                })
-                .from_err(),
-        )
+        Ok(match self.client.get_object(request).await {
+            Ok(object) => Ok(Some(LFSObject::new(
+                object.content_length.unwrap() as u64,
+                Box::pin(object.body.unwrap().map_ok(Bytes::from)),
+            ))),
+            Err(RusotoError::Service(GetObjectError::NoSuchKey(_))) => Ok(None),
+            Err(err) => Err(err),
+        }?)
     }
 
-    fn put(
+    async fn put(
         &self,
         key: StorageKey,
         value: LFSObject,
-    ) -> StorageFuture<(), Self::Error> {
+    ) -> Result<(), Self::Error> {
         let (len, stream) = value.into_parts();
 
         let request = PutObjectRequest {
@@ -223,59 +237,43 @@ where
             ..Default::default()
         };
 
-        Box::new(self.client.put_object(request).map(|_| ()).from_err())
+        self.client.put_object(request).await?;
+
+        Ok(())
     }
 
-    fn size(
-        &self,
-        key: &StorageKey,
-    ) -> StorageFuture<Option<u64>, Self::Error> {
+    async fn size(&self, key: &StorageKey) -> Result<Option<u64>, Self::Error> {
         let request = HeadObjectRequest {
             bucket: self.bucket.clone(),
             key: self.key_to_path(key),
             ..Default::default()
         };
 
-        Box::new(
-            self.client
-                .head_object(request)
-                .then(|result| match result {
-                    Ok(object) => {
-                        Ok(Some(object.content_length.unwrap() as u64))
-                    }
-                    Err(err) => {
-                        match &err {
-                            RusotoError::Unknown(e) => {
-                                // There is a bug in Rusoto that causes it to
-                                // always return an "unknown" error when the key
-                                // does not exist. Thus we must check the error
-                                // code manually. See:
-                                // https://github.com/rusoto/rusoto/issues/716
-                                if e.status == 404 {
-                                    Ok(None)
-                                } else {
-                                    Err(err)
-                                }
-                            }
-                            RusotoError::Service(
-                                HeadObjectError::NoSuchKey(_),
-                            ) => Ok(None),
-                            _ => Err(err),
-                        }
-                    }
-                })
-                .from_err(),
-        )
+        Ok(match self.client.head_object(request).await {
+            Ok(object) => Ok(Some(object.content_length.unwrap() as u64)),
+            Err(RusotoError::Unknown(e)) if e.status == 404 => {
+                // There is a bug in Rusoto that causes it to always return an
+                // "unknown" error when the key does not exist. Thus we must
+                // check the error code manually.
+                //
+                // See: https://github.com/rusoto/rusoto/issues/716
+                Ok(None)
+            }
+            Err(RusotoError::Service(HeadObjectError::NoSuchKey(_))) => {
+                Ok(None)
+            }
+            Err(err) => Err(err),
+        }?)
     }
 
     /// This never deletes objects from S3 and always returns success. This may
     /// be changed in the future.
-    fn delete(&self, _key: &StorageKey) -> StorageFuture<(), Self::Error> {
-        Box::new(future::ok(()))
+    async fn delete(&self, _key: &StorageKey) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Always returns an empty stream. This may be changed in the future.
     fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
-        Box::new(stream::empty())
+        Box::pin(stream::empty())
     }
 }

@@ -17,14 +17,15 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+use core::task::{Context, Poll};
+
 use std::fmt;
 use std::net::SocketAddr;
 use std::time::Instant;
 
-use futures::Future;
+use futures::future::{BoxFuture, FutureExt};
 use humantime::format_duration;
-use hyper::{service::Service, Request, Response};
-use log;
+use hyper::{service::Service, Body, Request, Response};
 
 /// Wraps a service to provide logging on both the request and the response.
 pub struct Logger<S> {
@@ -41,30 +42,32 @@ impl<S> Logger<S> {
     }
 }
 
-impl<S> Service for Logger<S>
+impl<S> Service<Request<Body>> for Logger<S>
 where
-    S: Service,
+    S: Service<Request<Body>, Response = Response<Body>>,
     S::Future: Send + 'static,
     S::Error: fmt::Display + Send + 'static,
 {
-    type ReqBody = S::ReqBody;
-    type ResBody = S::ResBody;
+    type Response = S::Response;
     type Error = S::Error;
-    type Future = Box<
-        dyn Future<Item = Response<Self::ResBody>, Error = Self::Error> + Send,
-    >;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn call(&mut self, req: Request<Self::ReqBody>) -> Self::Future {
+    fn poll_ready(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
         let method = req.method().clone();
         let uri = req.uri().clone();
         let remote_addr = self.remote_addr;
 
         let start = Instant::now();
 
-        Box::new(self.service.call(req).then(move |response| {
-            // TODO: Add a duration of how long it took to respond to the
-            // request.
-            match &response {
+        Box::pin(self.service.call(req).inspect(
+            move |response| match response {
                 Ok(response) => log::info!(
                     "[{}] {} {} - {} ({})",
                     remote_addr.ip(),
@@ -81,9 +84,7 @@ where
                     err,
                     format_duration(start.elapsed()),
                 ),
-            };
-
-            response
-        }))
+            },
+        ))
     }
 }

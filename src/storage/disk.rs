@@ -18,25 +18,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 use std::ffi::OsStr;
+use std::fs::Metadata;
 use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{
-    future::{self, Either},
-    Future, Stream,
+    future::{self, TryFutureExt},
+    stream::{StreamExt, TryStreamExt},
 };
-use tokio::{
-    self,
-    codec::{Decoder, Encoder, Framed},
-    fs,
-};
+use tokio::{self, fs};
+use tokio_util::codec::{Decoder, Encoder, Framed};
 use uuid::Uuid;
 
-use super::{
-    LFSObject, Namespace, Storage, StorageFuture, StorageKey, StorageStream,
-};
+use super::{LFSObject, Namespace, Storage, StorageKey, StorageStream};
 use crate::lfs::Oid;
 use crate::util::NamedTempFile;
 
@@ -45,9 +42,9 @@ pub struct Backend {
 }
 
 impl Backend {
-    pub fn new(root: PathBuf) -> impl Future<Item = Self, Error = io::Error> {
-        // TODO: Clean out files in the "incomplete" folder.
-        future::ok(Backend { root })
+    pub async fn new(root: PathBuf) -> Result<Self, io::Error> {
+        // TODO: Clean out files in the "incomplete" folder?
+        Ok(Backend { root })
     }
 
     // Use sub directories in order to better utilize the file system's internal
@@ -61,41 +58,38 @@ impl Backend {
     }
 }
 
+#[async_trait]
 impl Storage for Backend {
     type Error = io::Error;
 
-    fn get(
+    async fn get(
         &self,
         key: &StorageKey,
-    ) -> StorageFuture<Option<LFSObject>, Self::Error> {
-        Box::new(
-            fs::File::open(self.key_to_path(key))
-                .and_then(fs::File::metadata)
-                .then(move |result| {
-                    Ok(match result {
-                        Ok((file, metadata)) => {
-                            let stream = Framed::new(file, BytesCodec::new())
-                                .map(BytesMut::freeze);
+    ) -> Result<Option<LFSObject>, Self::Error> {
+        let file = match fs::File::open(self.key_to_path(key)).await {
+            Ok(file) => file,
+            Err(err) => {
+                if err.kind() == io::ErrorKind::NotFound {
+                    return Ok(None);
+                } else {
+                    return Err(err);
+                }
+            }
+        };
 
-                            Some(LFSObject::new(
-                                metadata.len(),
-                                Box::new(stream),
-                            ))
-                        }
-                        Err(err) => match err.kind() {
-                            io::ErrorKind::NotFound => None,
-                            _ => return Err(err),
-                        },
-                    })
-                }),
-        )
+        let metadata = file.metadata().await?;
+
+        let stream =
+            Framed::new(file, BytesCodec::new()).map_ok(BytesMut::freeze);
+
+        Ok(Some(LFSObject::new(metadata.len(), Box::pin(stream))))
     }
 
-    fn put(
+    async fn put(
         &self,
         key: StorageKey,
         value: LFSObject,
-    ) -> StorageFuture<(), Self::Error> {
+    ) -> Result<(), Self::Error> {
         let path = self.key_to_path(&key);
         let dir = path.parent().unwrap().to_path_buf();
 
@@ -104,67 +98,57 @@ impl Storage for Backend {
         let incomplete = self.root.join("incomplete");
         let temp_path = incomplete.join(Uuid::new_v4().to_string());
 
-        Box::new(
-            fs::create_dir_all(incomplete)
-                .and_then(move |()| {
-                    // Note that when this is dropped, the file is deleted.
-                    // Thus, if anything goes wrong we are not left with
-                    // a temporary file laying around.
-                    NamedTempFile::new(temp_path)
-                })
-                .and_then(move |file| {
-                    stream.forward(Framed::new(file, BytesCodec::new()))
-                })
-                .and_then(move |(_, sink)| {
-                    let written = sink.codec().written();
-                    let file = sink.into_inner();
+        fs::create_dir_all(incomplete).await?;
 
-                    if written != len {
-                        // If we didn't get a full object, we cannot save it to
-                        // disk. This can happen if we're using the disk as
-                        // a cache and there is an error in the middle of the
-                        // upload.
-                        Either::A(future::err(io::Error::new(
-                            io::ErrorKind::Other,
-                            "got incomplete object",
-                        )))
-                    } else {
-                        Either::B(
-                            fs::create_dir_all(dir)
-                                .and_then(move |()| file.persist(path))
-                                .map(|_| ()),
-                        )
-                    }
-                }),
-        )
+        // Note that when this is dropped, the file is deleted. Thus, if
+        // anything goes wrong we are not left with a temporary file laying
+        // around.
+        let file = NamedTempFile::new(temp_path).await?;
+
+        let mut sink = Framed::new(file, BytesCodec::new());
+
+        stream.forward(&mut sink).await?;
+
+        let written = sink.codec().written();
+        let file = sink.into_inner();
+
+        if written != len {
+            // If we didn't get a full object, we cannot save it to disk. This
+            // can happen if we're using the disk as a cache and there is an
+            // error in the middle of the upload.
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "got incomplete object",
+            ))
+        } else {
+            fs::create_dir_all(dir).await?;
+            file.persist(path).await?;
+            Ok(())
+        }
     }
 
-    fn size(
-        &self,
-        key: &StorageKey,
-    ) -> StorageFuture<Option<u64>, Self::Error> {
+    async fn size(&self, key: &StorageKey) -> Result<Option<u64>, Self::Error> {
         let path = self.key_to_path(key);
 
-        Box::new(
-            fs::metadata(path)
-                .map(move |metadata| Some(metadata.len()))
-                .or_else(move |err| match err.kind() {
-                    io::ErrorKind::NotFound => Ok(None),
-                    _ => Err(err),
-                }),
-        )
+        fs::metadata(path)
+            .await
+            .map(move |metadata| Some(metadata.len()))
+            .or_else(move |err| match err.kind() {
+                io::ErrorKind::NotFound => Ok(None),
+                _ => Err(err),
+            })
     }
 
-    fn delete(&self, key: &StorageKey) -> StorageFuture<(), Self::Error> {
+    async fn delete(&self, key: &StorageKey) -> Result<(), Self::Error> {
         // TODO: Attempt to delete the parent folder(s)? This would keep the
         // directory tree clean but it could also cause a race condition when
         // directories are created during `put` operations.
-        Box::new(fs::remove_file(self.key_to_path(key)).or_else(move |err| {
-            match err.kind() {
+        fs::remove_file(self.key_to_path(key))
+            .await
+            .or_else(move |err| match err.kind() {
                 io::ErrorKind::NotFound => Ok(()),
                 _ => Err(err),
-            }
-        }))
+            })
     }
 
     /// Lists the objects that are on disk.
@@ -189,41 +173,72 @@ impl Storage for Backend {
     fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
         let path = self.root.join("objects");
 
-        Box::new(
+        Box::pin(
             fs::read_dir(path)
-                .flatten_stream()
-                .map(move |entry| fs::read_dir(entry.path()).flatten_stream())
-                .flatten()
-                .map(move |entry| fs::read_dir(entry.path()).flatten_stream())
-                .flatten()
-                .map(move |entry| fs::read_dir(entry.path()).flatten_stream())
-                .flatten()
-                .map(move |entry| fs::read_dir(entry.path()).flatten_stream())
-                .flatten()
-                .and_then(move |entry| {
-                    let path = entry.path();
-                    future::poll_fn(move || entry.poll_metadata())
-                        .map(move |metadata| (path, metadata))
+                .try_flatten_stream()
+                .map_ok(move |entry| {
+                    fs::read_dir(entry.path()).try_flatten_stream()
                 })
-                .filter_map(move |(path, metadata)| {
-                    // Extract the org and project names from the top two path
-                    // components.
-                    let project_path = path.parent()?.parent()?.parent()?;
+                .try_flatten()
+                .map_ok(move |entry| {
+                    fs::read_dir(entry.path()).try_flatten_stream()
+                })
+                .try_flatten()
+                .map_ok(move |entry| {
+                    fs::read_dir(entry.path()).try_flatten_stream()
+                })
+                .try_flatten()
+                .map_ok(move |entry| {
+                    fs::read_dir(entry.path()).try_flatten_stream()
+                })
+                .try_flatten()
+                .filter(move |entry| {
+                    // Filter out missing files and directories.
+                    if let Err(err) = entry {
+                        if err.kind() == io::ErrorKind::NotFound {
+                            return future::ready(false);
+                        }
+                    }
 
-                    let project = project_path.file_name()?.to_str()?;
-                    let org = project_path.parent()?.file_name()?.to_str()?;
+                    future::ready(true)
+                })
+                .try_filter_map(move |entry| {
+                    // Helper function to be able to use the ?-operator on
+                    // `Option` types.
+                    fn do_it(
+                        path: PathBuf,
+                        metadata: Metadata,
+                    ) -> Option<(StorageKey, u64)> {
+                        // Extract the org and project names from the top two
+                        // path components.
+                        let project_path = path.parent()?.parent()?.parent()?;
 
-                    let namespace = Namespace::new(org.into(), project.into());
+                        let project = project_path.file_name()?.to_str()?;
+                        let org =
+                            project_path.parent()?.file_name()?.to_str()?;
 
-                    let oid = path
-                        .file_name()
-                        .and_then(OsStr::to_str)
-                        .and_then(|s| Oid::from_str(s).ok())?;
+                        let namespace =
+                            Namespace::new(org.into(), project.into());
 
-                    if metadata.is_file() {
-                        Some((StorageKey::new(namespace, oid), metadata.len()))
-                    } else {
-                        None
+                        let oid = path
+                            .file_name()
+                            .and_then(OsStr::to_str)
+                            .and_then(|s| Oid::from_str(s).ok())?;
+
+                        if metadata.is_file() {
+                            Some((
+                                StorageKey::new(namespace, oid),
+                                metadata.len(),
+                            ))
+                        } else {
+                            None
+                        }
+                    }
+
+                    async move {
+                        let path = entry.path();
+                        let metadata = entry.metadata().await?;
+                        Ok(do_it(path, metadata))
                     }
                 }),
         )
@@ -262,8 +277,7 @@ impl Decoder for BytesCodec {
     }
 }
 
-impl Encoder for BytesCodec {
-    type Item = Bytes;
+impl Encoder<Bytes> for BytesCodec {
     type Error = io::Error;
 
     fn encode(

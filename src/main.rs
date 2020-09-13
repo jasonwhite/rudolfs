@@ -27,19 +27,17 @@ mod sha256;
 mod storage;
 mod util;
 
+use std::convert::Infallible;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
-use std::process::exit;
 use std::sync::Arc;
 
-use futures::Future;
+use futures::future::{self, TryFutureExt};
 use hex::FromHex;
 use hyper::{self, server::conn::AddrStream, service::make_service_fn, Server};
-use log;
-use pretty_env_logger;
 use structopt::StructOpt;
 
-use crate::app::{App, State};
+use crate::app::App;
 use crate::error::Error;
 use crate::logger::Logger;
 use crate::storage::{Cached, Disk, Encrypted, Retrying, Verify, S3};
@@ -57,7 +55,7 @@ struct Args {
     #[structopt(long = "cache-dir")]
     cache_dir: PathBuf,
 
-    /// Logging level to use. By default, uses `info`.
+    /// Logging level to use.
     #[structopt(long = "log-level", default_value = "info")]
     log_level: log::LevelFilter,
 
@@ -80,7 +78,7 @@ struct Args {
 }
 
 impl Args {
-    fn main(self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn main(self) -> Result<(), Box<dyn std::error::Error>> {
         // Initialize logging.
         let mut logger_builder = pretty_env_logger::formatted_timed_builder();
         logger_builder.filter_module("rudolfs", self.log_level);
@@ -105,49 +103,39 @@ impl Args {
             self.max_cache_size.into::<human_size::Byte>().value() as u64;
         let key = self.key;
 
-        let mut rt = tokio::runtime::Runtime::new()?;
-
         // Initialize our storage backends.
         let disk = Disk::new(self.cache_dir).map_err(Error::from);
         let s3 = S3::new(self.s3_bucket, self.s3_prefix).map_err(Error::from);
-        let storage = disk
-            .join(s3)
-            .and_then(move |(disk, s3)| {
-                // Retry certain operations to S3 to make it more reliable.
-                let s3 = Retrying::new(s3);
-
-                // Add a little instability for testing purposes.
-                #[cfg(feature = "faulty")]
-                let s3 = Faulty::new(s3);
-                #[cfg(feature = "faulty")]
-                let disk = Faulty::new(disk);
-
-                // Use the disk as a cache.
-                Cached::new(max_cache_size, disk, s3).from_err()
-            })
-            .map(move |storage| {
-                // Verify object SHA256s as they are uploaded and downloaded.
-                Verify::new(Encrypted::new(key, storage))
-            });
 
         log::info!("Initializing storage...");
-        let storage = rt.block_on(storage)?;
-        log::info!("Successfully initialized storage.");
+        let (disk, s3) = future::try_join(disk, s3).await?;
 
-        // Initialize the shared state.
-        let state = Arc::new(State::new(storage));
+        // Retry certain operations to S3 to make it more reliable.
+        let s3 = Retrying::new(s3);
+
+        // Add a little instability for testing purposes.
+        #[cfg(feature = "faulty")]
+        let s3 = Faulty::new(s3);
+        #[cfg(feature = "faulty")]
+        let disk = Faulty::new(disk);
+
+        // Use the disk as a cache.
+        let storage = Cached::new(max_cache_size, disk, s3).await?;
+
+        // Encrypt/decrypt and verify all incoming and outgoing data.
+        let storage = Arc::new(Verify::new(Encrypted::new(key, storage)));
 
         // Create our service factory.
-        let new_service =
-            make_service_fn(move |socket: &AddrStream| -> Result<_, Error> {
-                // Create our app.
-                let service = App::new(state.clone());
+        let new_service = make_service_fn(move |socket: &AddrStream| {
+            // Create our app.
+            let service = App::new(storage.clone());
 
-                // Add logging middleware
-                let service = Logger::new(socket.remote_addr(), service);
-
-                Ok(service)
-            });
+            // Add logging middleware
+            future::ok::<_, Infallible>(Logger::new(
+                socket.remote_addr(),
+                service,
+            ))
+        });
 
         // Create the server.
         let server = Server::bind(&addr).serve(new_service);
@@ -155,19 +143,20 @@ impl Args {
         log::info!("Listening on {}", server.local_addr());
 
         // Run the server.
-        rt.block_on_all(server)?;
+        server.await?;
 
         Ok(())
     }
 }
 
-fn main() {
-    let exit_code = if let Err(err) = Args::from_args().main() {
+#[tokio::main]
+async fn main() {
+    let exit_code = if let Err(err) = Args::from_args().main().await {
         log::error!("{}", err);
         1
     } else {
         0
     };
 
-    exit(exit_code);
+    std::process::exit(exit_code);
 }

@@ -18,15 +18,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::io;
-use std::mem;
-use std::ops::Deref;
+use core::mem;
+use core::ops::Deref;
+use core::pin::Pin;
+use core::task::{Context, Poll};
+
 use std::path::{Path, PathBuf};
 
-use futures::{Future, Poll};
 use tokio::{
     fs,
-    io::{AsyncRead, AsyncWrite},
+    io::{self, AsyncRead, AsyncWrite},
 };
 
 /// A temporary file path. When dropped, the file is deleted.
@@ -35,16 +36,16 @@ pub struct TempPath(PathBuf);
 
 impl TempPath {
     /// Renames the file without deleting it.
-    pub fn persist<P: AsRef<Path>>(
+    pub async fn persist<P: AsRef<Path>>(
         mut self,
         new_path: P,
-    ) -> impl Future<Item = (), Error = io::Error> {
+    ) -> Result<(), io::Error> {
         // Don't drop self. We want to avoid deleting the file here and also
         // avoid leaking memory.
         let path = mem::replace(&mut self.0, PathBuf::new());
         mem::forget(self);
 
-        fs::rename(path, new_path)
+        fs::rename(path, new_path).await
     }
 }
 
@@ -77,25 +78,26 @@ pub struct NamedTempFile {
 }
 
 impl NamedTempFile {
-    pub fn new<P>(temp_path: P) -> impl Future<Item = Self, Error = io::Error>
+    pub async fn new<P>(temp_path: P) -> Result<Self, io::Error>
     where
         P: AsRef<Path> + Send + 'static,
     {
         let path = TempPath(temp_path.as_ref().to_owned());
-        fs::File::create(temp_path)
-            .map(move |file| NamedTempFile { path, file })
+        let file = fs::File::create(temp_path).await?;
+        Ok(NamedTempFile { path, file })
     }
 
     pub fn into_parts(self) -> (fs::File, TempPath) {
         (self.file, self.path)
     }
 
-    pub fn persist<P: AsRef<Path>>(
+    pub async fn persist<P: AsRef<Path>>(
         self,
         new_path: P,
-    ) -> impl Future<Item = fs::File, Error = io::Error> {
+    ) -> Result<fs::File, io::Error> {
         let (file, path) = self.into_parts();
-        path.persist(new_path).map(move |()| file)
+        path.persist(new_path).await?;
+        Ok(file)
     }
 }
 
@@ -117,33 +119,48 @@ impl AsMut<fs::File> for NamedTempFile {
     }
 }
 
-impl io::Read for NamedTempFile {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.file.read(buf)
-    }
-}
-
-impl io::Write for NamedTempFile {
-    #[inline]
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.file.write(buf)
-    }
-
-    #[inline]
-    fn flush(&mut self) -> io::Result<()> {
-        self.file.flush()
-    }
-}
-
 impl AsyncRead for NamedTempFile {
     #[inline]
-    unsafe fn prepare_uninitialized_buffer(&self, buf: &mut [u8]) -> bool {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &mut [u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.file).poll_read(cx, buf)
+    }
+
+    #[inline]
+    unsafe fn prepare_uninitialized_buffer(
+        &self,
+        buf: &mut [mem::MaybeUninit<u8>],
+    ) -> bool {
         self.file.prepare_uninitialized_buffer(buf)
     }
 }
 
 impl AsyncWrite for NamedTempFile {
-    fn shutdown(&mut self) -> Poll<(), io::Error> {
-        self.file.shutdown()
+    #[inline]
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        Pin::new(&mut self.file).poll_write(cx, buf)
+    }
+
+    #[inline]
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+    ) -> Poll<Result<(), io::Error>> {
+        Pin::new(&mut self.file).poll_flush(cx)
+    }
+
+    #[inline]
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+    ) -> Poll<Result<(), io::Error>> {
+        Pin::new(&mut self.file).poll_shutdown(cx)
     }
 }
