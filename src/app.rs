@@ -69,16 +69,18 @@ pub struct App<S> {
     storage: S,
 }
 
-impl<S> App<S>
-where
-    S: Storage + Send + Sync + 'static,
-    S::Error: Into<Error> + 'static,
-    Error: From<S::Error>,
-{
+impl<S> App<S> {
     pub fn new(storage: S) -> Self {
         App { storage }
     }
+}
 
+impl<S> App<S>
+where
+    S: Storage + Send + Sync,
+    S::Error: Into<Error>,
+    Error: From<S::Error>,
+{
     /// Handles the index route.
     fn index(req: Request<Body>) -> Result<Response<Body>, Error> {
         let template = IndexTemplate {
