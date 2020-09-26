@@ -1124,7 +1124,7 @@ dependencies = [
 
 [[package]]
 name = "rudolfs"
-version = "0.2.10"
+version = "0.2.11"
 dependencies = [
  "askama 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "async-trait 0.1.40 (registry+https://github.com/rust-lang/crates.io-index)",
