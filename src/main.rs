@@ -40,7 +40,7 @@ use structopt::StructOpt;
 use crate::app::App;
 use crate::error::Error;
 use crate::logger::Logger;
-use crate::storage::{Cached, Disk, Encrypted, Retrying, Verify, S3};
+use crate::storage::{Cached, Disk, Encrypted, Retrying, Storage, Verify, S3};
 
 #[cfg(feature = "faulty")]
 use crate::storage::Faulty;
@@ -53,7 +53,7 @@ struct Args {
 
     /// Root directory of the object cache.
     #[structopt(long = "cache-dir")]
-    cache_dir: PathBuf,
+    cache_dir: Option<PathBuf>,
 
     /// Logging level to use.
     #[structopt(long = "log-level", default_value = "info")]
@@ -98,17 +98,10 @@ impl Args {
             .next()
             .unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 8080)));
 
-        // Convert cache size to bytes.
-        let max_cache_size =
-            self.max_cache_size.into::<human_size::Byte>().value() as u64;
-        let key = self.key;
-
-        // Initialize our storage backends.
-        let disk = Disk::new(self.cache_dir).map_err(Error::from);
-        let s3 = S3::new(self.s3_bucket, self.s3_prefix).map_err(Error::from);
-
         log::info!("Initializing storage...");
-        let (disk, s3) = future::try_join(disk, s3).await?;
+        let s3 = S3::new(self.s3_bucket, self.s3_prefix)
+            .map_err(Error::from)
+            .await?;
 
         // Retry certain operations to S3 to make it more reliable.
         let s3 = Retrying::new(s3);
@@ -116,37 +109,56 @@ impl Args {
         // Add a little instability for testing purposes.
         #[cfg(feature = "faulty")]
         let s3 = Faulty::new(s3);
-        #[cfg(feature = "faulty")]
-        let disk = Faulty::new(disk);
 
-        // Use the disk as a cache.
-        let storage = Cached::new(max_cache_size, disk, s3).await?;
+        match self.cache_dir {
+            Some(cache_dir) => {
+                // Convert cache size to bytes.
+                let max_cache_size =
+                    self.max_cache_size.into::<human_size::Byte>().value()
+                        as u64;
 
-        // Encrypt/decrypt and verify all incoming and outgoing data.
-        let storage = Arc::new(Verify::new(Encrypted::new(key, storage)));
+                // Use disk storage as a cache.
+                let disk = Disk::new(cache_dir).map_err(Error::from).await?;
 
-        // Create our service factory.
-        let new_service = make_service_fn(move |socket: &AddrStream| {
-            // Create our app.
-            let service = App::new(storage.clone());
+                #[cfg(feature = "faulty")]
+                let disk = Faulty::new(disk);
 
-            // Add logging middleware
-            future::ok::<_, Infallible>(Logger::new(
-                socket.remote_addr(),
-                service,
-            ))
-        });
-
-        // Create the server.
-        let server = Server::bind(&addr).serve(new_service);
-
-        log::info!("Listening on {}", server.local_addr());
-
-        // Run the server.
-        server.await?;
+                let cache = Cached::new(max_cache_size, disk, s3).await?;
+                let storage = Verify::new(Encrypted::new(self.key, cache));
+                run_server(storage, &addr).await?;
+            }
+            None => {
+                let storage = Verify::new(Encrypted::new(self.key, s3));
+                run_server(storage, &addr).await?;
+            }
+        };
 
         Ok(())
     }
+}
+
+async fn run_server<S>(storage: S, addr: &SocketAddr) -> hyper::Result<()>
+where
+    S: Storage + Send + Sync + 'static,
+    S::Error: Into<Error>,
+    Error: From<S::Error>,
+{
+    let storage = Arc::new(storage);
+
+    let new_service = make_service_fn(move |socket: &AddrStream| {
+        // Create our app.
+        let service = App::new(storage.clone());
+
+        // Add logging middleware
+        future::ok::<_, Infallible>(Logger::new(socket.remote_addr(), service))
+    });
+
+    let server = Server::bind(&addr).serve(new_service);
+
+    log::info!("Listening on {}", server.local_addr());
+
+    server.await?;
+    Ok(())
 }
 
 #[tokio::main]
