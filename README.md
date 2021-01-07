@@ -1,6 +1,6 @@
 # Rudo*lfs*
 
-[![Build Status](https://api.cirrus-ci.com/github/jasonwhite/rudolfs.svg?branch=master)](https://cirrus-ci.com/github/jasonwhite/rudolfs) [![Crates.io](https://img.shields.io/crates/v/rudolfs.svg)](https://crates.io/crates/rudolfs)
+[![Build Status](https://api.cirrus-ci.com/github/jasonwhite/rudolfs.svg?branch=master)](https://cirrus-ci.com/github/jasonwhite/rudolfs) [![Crates.io](https://img.shields.io/crates/v/rudolfs.svg)](https://crates.io/crates/rudolfs) [![AUR version](https://img.shields.io/aur/version/rudolfs)](https://aur.archlinux.org/packages/rudolfs/)
 
 A high-performance, caching Git LFS server with an AWS S3 back-end.
 
