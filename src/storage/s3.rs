@@ -169,13 +169,16 @@ impl<C> Backend<C> {
 
         // We need to retry here so that any fake S3 services have a chance to
         // start up alongside Rudolfs.
-        (|| async {
-            // Note that we don't retry certain failures, like credential or
-            // missing bucket errors. These are unlikely to be transient errors.
-            c.head_bucket(req.clone())
-                .await
-                .map_err(InitError::from)
-                .map_err(InitError::into_backoff)
+        (|| {
+            async {
+                // Note that we don't retry certain failures, like credential or
+                // missing bucket errors. These are unlikely to be transient
+                // errors.
+                c.head_bucket(req.clone())
+                    .await
+                    .map_err(InitError::from)
+                    .map_err(InitError::into_backoff)
+            }
         })
         .retry(ExponentialBackoff::default())
         .await?;

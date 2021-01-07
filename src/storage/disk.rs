@@ -43,6 +43,8 @@ pub struct Backend {
 
 impl Backend {
     pub async fn new(root: PathBuf) -> Result<Self, io::Error> {
+        fs::create_dir_all(&root).await?;
+
         // TODO: Clean out files in the "incomplete" folder?
         Ok(Backend { root })
     }
