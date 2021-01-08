@@ -163,6 +163,7 @@ impl<C> Backend<C> {
         // in application startup.
         let req = HeadBucketRequest {
             bucket: bucket.clone(),
+            ..Default::default()
         };
 
         let c = client.clone();

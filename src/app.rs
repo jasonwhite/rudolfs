@@ -28,7 +28,7 @@ use futures::{
     stream::TryStreamExt,
 };
 use http::{self, header, StatusCode, Uri};
-use hyper::{self, service::Service, Body, Method, Request, Response};
+use hyper::{self, body::Body, service::Service, Method, Request, Response};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
