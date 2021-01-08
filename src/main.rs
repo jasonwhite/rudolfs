@@ -45,43 +45,95 @@ use crate::storage::{Cached, Disk, Encrypted, Retrying, Storage, Verify, S3};
 #[cfg(feature = "faulty")]
 use crate::storage::Faulty;
 
+// Additional help to append to the end when `--help` is specified.
+static AFTER_HELP: &str = include_str!("help.md");
+
 #[derive(StructOpt)]
+#[structopt(after_help = AFTER_HELP)]
 struct Args {
+    #[structopt(flatten)]
+    global: GlobalArgs,
+
+    #[structopt(subcommand)]
+    backend: Backend,
+}
+
+#[derive(StructOpt)]
+enum Backend {
+    /// Starts the server with S3 as the storage backend.
+    #[structopt(name = "s3")]
+    S3(S3Args),
+
+    /// Starts the server with the local disk as the storage backend.
+    #[structopt(name = "local")]
+    Local(LocalArgs),
+}
+
+#[derive(StructOpt)]
+struct GlobalArgs {
     /// Host or address to listen on.
-    #[structopt(long = "host", default_value = "0.0.0.0:8080")]
+    #[structopt(
+        long = "host",
+        default_value = "0.0.0.0:8080",
+        env = "RUDOLFS_HOST"
+    )]
     host: String,
 
-    /// Root directory of the object cache.
-    #[structopt(long = "cache-dir")]
-    cache_dir: Option<PathBuf>,
-
-    /// Logging level to use.
-    #[structopt(long = "log-level", default_value = "info")]
-    log_level: log::LevelFilter,
-
-    /// Amazon S3 bucket to use.
-    #[structopt(long = "s3-bucket")]
-    s3_bucket: String,
-
-    /// Amazon S3 path prefix to use.
-    #[structopt(long = "s3-prefix", default_value = "lfs")]
-    s3_prefix: String,
-
     /// Encryption key to use.
-    #[structopt(long = "key", parse(try_from_str = FromHex::from_hex))]
+    #[structopt(
+        long = "key",
+        parse(try_from_str = FromHex::from_hex),
+        env = "RUDOLFS_KEY"
+    )]
     key: [u8; 32],
+
+    /// Root directory of the object cache. If not specified or if the local
+    /// disk is the storage backend, then no local disk cache will be used.
+    #[structopt(long = "cache-dir", env = "RUDOLFS_CACHE_DIR")]
+    cache_dir: Option<PathBuf>,
 
     /// Maximum size of the cache, in bytes. Set to 0 for an unlimited cache
     /// size.
-    #[structopt(long = "max-cache-size", default_value = "50 GiB")]
+    #[structopt(
+        long = "max-cache-size",
+        default_value = "50 GiB",
+        env = "RUDOLFS_MAX_CACHE_SIZE"
+    )]
     max_cache_size: human_size::Size,
+
+    /// Logging level to use.
+    #[structopt(
+        long = "log-level",
+        default_value = "info",
+        env = "RUDOLFS_LOG"
+    )]
+    log_level: log::LevelFilter,
+}
+
+#[derive(StructOpt)]
+struct S3Args {
+    /// Amazon S3 bucket to use.
+    #[structopt(long, env = "RUDOLFS_S3_BUCKET")]
+    bucket: String,
+
+    /// Amazon S3 path prefix to use.
+    #[structopt(long, default_value = "lfs", env = "RUDOLFS_S3_PREFIX")]
+    prefix: String,
+}
+
+#[derive(StructOpt)]
+struct LocalArgs {
+    /// Directory where the LFS files should be stored. This directory will be
+    /// created if it does not exist.
+    #[structopt(long, env = "RUDOLFS_LOCAL_PATH")]
+    path: PathBuf,
 }
 
 impl Args {
     async fn main(self) -> Result<(), Box<dyn std::error::Error>> {
         // Initialize logging.
         let mut logger_builder = pretty_env_logger::formatted_timed_builder();
-        logger_builder.filter_module("rudolfs", self.log_level);
+        logger_builder.filter_module("rudolfs", self.global.log_level);
 
         if let Ok(env) = std::env::var("RUST_LOG") {
             // Support the addition of RUST_LOG to help with debugging
@@ -93,13 +145,30 @@ impl Args {
 
         // Find a socket address to bind to. This will resolve domain names.
         let addr = self
+            .global
             .host
             .to_socket_addrs()?
             .next()
             .unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 8080)));
 
         log::info!("Initializing storage...");
-        let s3 = S3::new(self.s3_bucket, self.s3_prefix)
+
+        match self.backend {
+            Backend::S3(s3) => s3.run(addr, self.global).await?,
+            Backend::Local(local) => local.run(addr, self.global).await?,
+        }
+
+        Ok(())
+    }
+}
+
+impl S3Args {
+    async fn run(
+        self,
+        addr: SocketAddr,
+        global_args: GlobalArgs,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let s3 = S3::new(self.bucket, self.prefix)
             .map_err(Error::from)
             .await?;
 
@@ -110,12 +179,13 @@ impl Args {
         #[cfg(feature = "faulty")]
         let s3 = Faulty::new(s3);
 
-        match self.cache_dir {
+        match global_args.cache_dir {
             Some(cache_dir) => {
                 // Convert cache size to bytes.
-                let max_cache_size =
-                    self.max_cache_size.into::<human_size::Byte>().value()
-                        as u64;
+                let max_cache_size = global_args
+                    .max_cache_size
+                    .into::<human_size::Byte>()
+                    .value() as u64;
 
                 // Use disk storage as a cache.
                 let disk = Disk::new(cache_dir).map_err(Error::from).await?;
@@ -124,15 +194,32 @@ impl Args {
                 let disk = Faulty::new(disk);
 
                 let cache = Cached::new(max_cache_size, disk, s3).await?;
-                let storage = Verify::new(Encrypted::new(self.key, cache));
+                let storage =
+                    Verify::new(Encrypted::new(global_args.key, cache));
                 run_server(storage, &addr).await?;
             }
             None => {
-                let storage = Verify::new(Encrypted::new(self.key, s3));
+                let storage = Verify::new(Encrypted::new(global_args.key, s3));
                 run_server(storage, &addr).await?;
             }
-        };
+        }
 
+        Ok(())
+    }
+}
+
+impl LocalArgs {
+    async fn run(
+        self,
+        addr: SocketAddr,
+        global_args: GlobalArgs,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let storage = Disk::new(self.path).map_err(Error::from).await?;
+        let storage = Verify::new(Encrypted::new(global_args.key, storage));
+
+        log::info!("Local disk storage initialized.");
+
+        run_server(storage, &addr).await?;
         Ok(())
     }
 }

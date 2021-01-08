@@ -6,7 +6,10 @@ A high-performance, caching Git LFS server with an AWS S3 back-end.
 
 ## Features
 
- - AWS S3 permanent storage back-end.
+ - Multiple backends:
+
+   1. AWS S3 backend with an optional local disk cache.
+   2. Local disk backend.
 
  - A configurable local disk cache to speed up downloads (and reduce your
    S3 bill).
@@ -73,9 +76,10 @@ KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 cargo run -- \
   --cache-dir cache \
   --host localhost:8080 \
-  --s3-bucket foobar \
   --max-cache-size 10GiB \
-  --key $KEY
+  --key $KEY \
+  s3 \
+  --bucket foobar
 ```
 
 **Note**: Always use a different S3 bucket, cache directory, and encryption key
