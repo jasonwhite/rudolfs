@@ -1,8 +1,9 @@
 # Changelog
 
-## v0.3
+## v0.3.0
 
  - Created this changelog.
+ - Updated tokio to v1.0.
 
 ### Breaking changes
 
