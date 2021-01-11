@@ -23,12 +23,10 @@ use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use async_stream::try_stream;
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
-use futures::{
-    future::{self, TryFutureExt},
-    stream::{StreamExt, TryStreamExt},
-};
+use futures::stream::{StreamExt, TryStreamExt};
 use tokio::{self, fs};
 use tokio_util::codec::{Decoder, Encoder, Framed};
 use uuid::Uuid;
@@ -175,75 +173,80 @@ impl Storage for Backend {
     fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
         let path = self.root.join("objects");
 
-        Box::pin(
-            fs::read_dir(path)
-                .try_flatten_stream()
-                .map_ok(move |entry| {
-                    fs::read_dir(entry.path()).try_flatten_stream()
-                })
-                .try_flatten()
-                .map_ok(move |entry| {
-                    fs::read_dir(entry.path()).try_flatten_stream()
-                })
-                .try_flatten()
-                .map_ok(move |entry| {
-                    fs::read_dir(entry.path()).try_flatten_stream()
-                })
-                .try_flatten()
-                .map_ok(move |entry| {
-                    fs::read_dir(entry.path()).try_flatten_stream()
-                })
-                .try_flatten()
-                .filter(move |entry| {
-                    // Filter out missing files and directories.
-                    if let Err(err) = entry {
-                        if err.kind() == io::ErrorKind::NotFound {
-                            return future::ready(false);
+        let objects = try_stream! {
+            let mut orgs = fs::read_dir(path).await?;
+
+            while let Some(entry) = orgs.next_entry().await? {
+                let mut projects = fs::read_dir(entry.path()).await?;
+
+                while let Some(entry) = projects.next_entry().await? {
+                    let mut tier1 = fs::read_dir(entry.path()).await?;
+
+                    while let Some(entry) = tier1.next_entry().await? {
+                        let mut tier2 = fs::read_dir(entry.path()).await?;
+
+                        while let Some(entry) = tier2.next_entry().await? {
+                            yield entry;
                         }
                     }
+                }
+            }
+        };
 
-                    future::ready(true)
-                })
-                .try_filter_map(move |entry| {
-                    // Helper function to be able to use the ?-operator on
-                    // `Option` types.
-                    fn do_it(
-                        path: PathBuf,
-                        metadata: Metadata,
-                    ) -> Option<(StorageKey, u64)> {
-                        // Extract the org and project names from the top two
-                        // path components.
-                        let project_path = path.parent()?.parent()?.parent()?;
+        Box::pin(objects.filter_map(move |entry: io::Result<_>| {
+            // Helper function to be able to use the ?-operator on
+            // `Option` types.
+            fn do_it(
+                path: PathBuf,
+                metadata: Metadata,
+            ) -> Option<(StorageKey, u64)> {
+                // Extract the org and project names from the top two
+                // path components.
+                let project_path = path.parent()?.parent()?.parent()?;
 
-                        let project = project_path.file_name()?.to_str()?;
-                        let org =
-                            project_path.parent()?.file_name()?.to_str()?;
+                let project = project_path.file_name()?.to_str()?;
+                let org = project_path.parent()?.file_name()?.to_str()?;
 
-                        let namespace =
-                            Namespace::new(org.into(), project.into());
+                let namespace = Namespace::new(org.into(), project.into());
 
-                        let oid = path
-                            .file_name()
-                            .and_then(OsStr::to_str)
-                            .and_then(|s| Oid::from_str(s).ok())?;
+                let oid = path
+                    .file_name()
+                    .and_then(OsStr::to_str)
+                    .and_then(|s| Oid::from_str(s).ok())?;
 
-                        if metadata.is_file() {
-                            Some((
-                                StorageKey::new(namespace, oid),
-                                metadata.len(),
-                            ))
-                        } else {
-                            None
-                        }
-                    }
+                if metadata.is_file() {
+                    Some((StorageKey::new(namespace, oid), metadata.len()))
+                } else {
+                    None
+                }
+            }
 
-                    async move {
+            async move {
+                match entry {
+                    Ok(entry) => {
                         let path = entry.path();
-                        let metadata = entry.metadata().await?;
-                        Ok(do_it(path, metadata))
+                        match entry.metadata().await {
+                            Err(err) => Some(Err(err)),
+                            Ok(metadata) => do_it(path, metadata).map(Ok),
+                        }
                     }
-                }),
-        )
+                    Err(err) => {
+                        if err.kind() == io::ErrorKind::NotFound {
+                            // Simply filter out missing directories or
+                            // directories that are not actually directories.
+                            None
+                        } else {
+                            // Propagate all other errors.
+                            //
+                            // TODO: Just filter these out? There isn't much
+                            // that the consumer can do about these errors since
+                            // there is no storage key to be had.
+                            Some(Err(err))
+                        }
+                    }
+                }
+            }
+        }))
     }
 }
 

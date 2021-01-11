@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 
 use tokio::{
     fs,
-    io::{self, AsyncRead, AsyncWrite},
+    io::{self, AsyncRead, AsyncWrite, ReadBuf},
 };
 
 /// A temporary file path. When dropped, the file is deleted.
@@ -124,17 +124,9 @@ impl AsyncRead for NamedTempFile {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         Pin::new(&mut self.file).poll_read(cx, buf)
-    }
-
-    #[inline]
-    unsafe fn prepare_uninitialized_buffer(
-        &self,
-        buf: &mut [mem::MaybeUninit<u8>],
-    ) -> bool {
-        self.file.prepare_uninitialized_buffer(buf)
     }
 }
 
