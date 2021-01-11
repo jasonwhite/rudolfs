@@ -29,6 +29,7 @@ use futures::{
     stream::{StreamExt, TryStreamExt},
     Future,
 };
+use humansize::{file_size_opts as file_size, FileSize};
 use tokio::{self, sync::Mutex};
 
 use crate::lru;
@@ -103,8 +104,17 @@ where
         cache: C,
         storage: S,
     ) -> Result<Self, C::Error> {
-        let lru = Arc::new(Mutex::new(Cache::from_stream(cache.list()).await?));
+        let lru = Cache::from_stream(cache.list()).await?;
 
+        log::info!(
+            "Prepopulated cache with {} entries ({})",
+            lru.len(),
+            lru.size()
+                .file_size(file_size::DECIMAL)
+                .unwrap_or_else(|e| e)
+        );
+
+        let lru = Arc::new(Mutex::new(lru));
         let cache = Arc::new(cache);
 
         // Prune the cache. The maximum size setting may have changed

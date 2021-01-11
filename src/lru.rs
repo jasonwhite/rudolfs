@@ -52,6 +52,11 @@ where
         self.size
     }
 
+    /// Returns the number of items in the cache.
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
     /// Loads the cache from a stream of entries. Note that this throws away any
     /// LRU information. Since the server shouldn't be restarted very often,
     /// this shouldn't be a problem in practice. Frequently used entries will

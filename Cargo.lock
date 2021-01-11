@@ -1133,6 +1133,7 @@ dependencies = [
  "hex 0.3.2",
  "http",
  "human-size",
+ "humansize",
  "humantime 2.0.1",
  "hyper",
  "linked-hash-map",

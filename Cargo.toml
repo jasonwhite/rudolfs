@@ -27,6 +27,7 @@ generic-array = "0.14"
 hex = "0.3"
 http = "0.2"
 human-size = "0.4"
+humansize = "1"
 humantime = "2"
 hyper = { version = "0.14", features = ["server", "http1", "http2", "tcp", "stream"] }
 linked-hash-map = { version = "0.5", features = ["serde_impl"] }
