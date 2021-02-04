@@ -26,10 +26,11 @@ services:
       - /data
       - --key
       - ${LFS_ENCRYPTION_KEY}
-      - --s3-bucket
-      - ${LFS_S3_BUCKET}
       - --max-cache-size
       - ${LFS_MAX_CACHE_SIZE}
+      - s3
+      - --bucket
+      - ${LFS_S3_BUCKET}
 
   # A real production server should use nginx. How to configure this depends on
   # your needs. Use your Google-search skills to configure this correctly.
