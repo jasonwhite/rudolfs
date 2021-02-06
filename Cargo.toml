@@ -48,6 +48,14 @@ version = "0.46"
 default_features = false
 features = ["rustls"]
 
+[dependencies.rusoto_credential]
+version = "0.46"
+
+[dependencies.rusoto_sts]
+version = "0.46"
+features = ["rustls"]
+default_features = false
+
 [dependencies.rusoto_s3]
 version = "0.46"
 default_features = false
