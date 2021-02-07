@@ -30,10 +30,10 @@ use rusoto_s3::{
     S3Client, StreamingBody, S3,
 };
 
-use rusoto_credential::{AutoRefreshingProvider, CredentialsError};
-use rusoto_sts::WebIdentityProvider;
+use rusoto_credential::{CredentialsError, AutoRefreshingProvider, ProvideAwsCredentials};
 
 use super::{LFSObject, Storage, StorageKey, StorageStream};
+use rusoto_sts::WebIdentityProvider;
 
 #[derive(Debug, From, Display)]
 pub enum Error {
@@ -150,8 +150,15 @@ impl Backend {
             region.name()
         );
 
-        let cred_provider = AutoRefreshingProvider::new(WebIdentityProvider::from_k8s_env())?;
-        Backend::with_client(S3Client::new_with(HttpClient::new().unwrap(), cred_provider, region), bucket, prefix).await
+        let k8s_provider = WebIdentityProvider::from_k8s_env();
+        let client: S3Client = if let Ok(_) = k8s_provider.credentials().await {
+            log::info!("Using credentials from Kubernetes");
+            S3Client::new_with(HttpClient::new().unwrap(), AutoRefreshingProvider::new(k8s_provider)?, region)
+        } else {
+            S3Client::new(region)
+        };
+
+        Backend::with_client(client, bucket, prefix).await
     }
 }
 
