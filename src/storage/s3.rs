@@ -24,16 +24,15 @@ use derive_more::{Display, From};
 use futures::{stream, stream::TryStreamExt};
 use http::StatusCode;
 use rusoto_core::{Region, HttpClient, RusotoError};
+use rusoto_credential::{CredentialsError, AutoRefreshingProvider, ProvideAwsCredentials};
+use rusoto_sts::WebIdentityProvider;
 use rusoto_s3::{
     GetObjectError, GetObjectRequest, HeadBucketError, HeadBucketRequest,
     HeadObjectError, HeadObjectRequest, PutObjectError, PutObjectRequest,
     S3Client, StreamingBody, S3,
 };
 
-use rusoto_credential::{CredentialsError, AutoRefreshingProvider, ProvideAwsCredentials};
-
 use super::{LFSObject, Storage, StorageKey, StorageStream};
-use rusoto_sts::WebIdentityProvider;
 
 #[derive(Debug, From, Display)]
 pub enum Error {
