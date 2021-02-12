@@ -335,6 +335,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "212d0f5754cb6769937f4501cc0e67f4f4483c8d2c3e1e922ee9edbe4ab4c7c0"
 
 [[package]]
+name = "dtoa"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88d7ed2934d741c6b37e33e3832298e8850b53fd2d2bea03873375596c7cea4e"
+
+[[package]]
 name = "env_logger"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1141,7 +1147,9 @@ dependencies = [
  "pretty_env_logger",
  "rand",
  "rusoto_core",
+ "rusoto_credential",
  "rusoto_s3",
+ "rusoto_sts",
  "serde",
  "serde_json",
  "sha2",
@@ -1231,6 +1239,21 @@ dependencies = [
  "sha2",
  "time",
  "tokio 1.0.1",
+]
+
+[[package]]
+name = "rusoto_sts"
+version = "0.46.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f93005e0c3b9e40a424b50ca71886d2445cc19bb6cdac3ac84c2daff482eb59"
+dependencies = [
+ "async-trait",
+ "bytes 1.0.0",
+ "chrono",
+ "futures",
+ "rusoto_core",
+ "serde_urlencoded",
+ "xml-rs",
 ]
 
 [[package]]
@@ -1375,6 +1398,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7f3f8714511d29f60be0ea965bc784df1b6903da5bbac801df36b1bbc7b4880"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "serde_urlencoded"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ec5d77e2d4c73717816afac02670d5c4f534ea95ed430442cad02e7a6e32c97"
+dependencies = [
+ "dtoa",
+ "itoa",
+ "serde",
+ "url",
 ]
 
 [[package]]
