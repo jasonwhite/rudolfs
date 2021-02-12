@@ -23,14 +23,14 @@ use bytes::Bytes;
 use derive_more::{Display, From};
 use futures::{stream, stream::TryStreamExt};
 use http::StatusCode;
-use rusoto_core::{Region, HttpClient, RusotoError};
-use rusoto_credential::{CredentialsError, AutoRefreshingProvider, ProvideAwsCredentials};
-use rusoto_sts::WebIdentityProvider;
+use rusoto_core::{HttpClient, Region, RusotoError};
+use rusoto_credential::{AutoRefreshingProvider, ProvideAwsCredentials};
 use rusoto_s3::{
     GetObjectError, GetObjectRequest, HeadBucketError, HeadBucketRequest,
     HeadObjectError, HeadObjectRequest, PutObjectError, PutObjectRequest,
     S3Client, StreamingBody, S3,
 };
+use rusoto_sts::WebIdentityProvider;
 
 use super::{LFSObject, Storage, StorageKey, StorageStream};
 
@@ -46,7 +46,9 @@ pub enum Error {
     /// The uploaded object is too large.
     TooLarge(u64),
 
-    From(CredentialsError),
+    Tls(rusoto_core::request::TlsError),
+
+    Credentials(rusoto_credential::CredentialsError),
 }
 
 impl ::std::error::Error for Error {}
@@ -149,10 +151,15 @@ impl Backend {
             region.name()
         );
 
+        // Check if there is any k8s credential provider. If there is, use it.
         let k8s_provider = WebIdentityProvider::from_k8s_env();
-        let client: S3Client = if let Ok(_) = k8s_provider.credentials().await {
+        let client = if k8s_provider.credentials().await.is_ok() {
             log::info!("Using credentials from Kubernetes");
-            S3Client::new_with(HttpClient::new().unwrap(), AutoRefreshingProvider::new(k8s_provider)?, region)
+            S3Client::new_with(
+                HttpClient::new()?,
+                AutoRefreshingProvider::new(k8s_provider)?,
+                region,
+            )
         } else {
             S3Client::new(region)
         };
