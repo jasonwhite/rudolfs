@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.1
+
+ - Added support for Kubernetes credentials (#26)
+
 ## v0.3.0
 
  - Created this changelog.
