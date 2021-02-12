@@ -27,7 +27,6 @@ use futures::{
     channel::oneshot,
     future::{self, FutureExt, TryFutureExt},
     stream::{StreamExt, TryStreamExt},
-    Future,
 };
 use humansize::{file_size_opts as file_size, FileSize};
 use tokio::{self, sync::Mutex};
@@ -165,44 +164,42 @@ where
     Ok(deleted)
 }
 
-fn cache_and_prune<C>(
+async fn cache_and_prune<C>(
     cache: Arc<C>,
     key: StorageKey,
     obj: LFSObject,
     lru: Arc<Mutex<Cache>>,
     max_size: u64,
-) -> impl Future<Output = Result<(), C::Error>>
+) -> Result<(), C::Error>
 where
     C: Storage + Send + Sync,
 {
-    async move {
-        let len = obj.len();
+    let len = obj.len();
 
-        let oid = *key.oid();
+    let oid = *key.oid();
 
-        log::debug!("Caching {}", oid);
-        cache.put(key.clone(), obj).await?;
-        log::debug!("Finished caching {}", oid);
+    log::debug!("Caching {}", oid);
+    cache.put(key.clone(), obj).await?;
+    log::debug!("Finished caching {}", oid);
 
-        // Add the object info to our LRU cache once the download from
-        // permanent storage is complete.
-        {
-            let mut lru = lru.lock().await;
-            lru.push(key, len);
+    // Add the object info to our LRU cache once the download from
+    // permanent storage is complete.
+    {
+        let mut lru = lru.lock().await;
+        lru.push(key, len);
+    }
+
+    match prune_cache(lru, max_size, cache).await {
+        Ok(count) => {
+            if count > 0 {
+                log::info!("Pruned {} entries from the cache", count);
+            }
+
+            Ok(())
         }
-
-        match prune_cache(lru, max_size, cache).await {
-            Ok(count) => {
-                if count > 0 {
-                    log::info!("Pruned {} entries from the cache", count);
-                }
-
-                Ok(())
-            }
-            Err(err) => {
-                log::error!("Error caching {} ({})", oid, err);
-                Err(err)
-            }
+        Err(err) => {
+            log::error!("Error caching {} ({})", oid, err);
+            Err(err)
         }
     }
 }
