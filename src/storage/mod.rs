@@ -224,6 +224,9 @@ pub trait Storage {
     async fn max_size(&self) -> Option<u64> {
         None
     }
+
+    /// Returns a publicly accessible URL
+    fn public_url(&self, key: &StorageKey) -> Option<String>;
 }
 
 #[async_trait]
@@ -273,5 +276,9 @@ where
     #[inline]
     async fn max_size(&self) -> Option<u64> {
         self.as_ref().max_size().await
+    }
+
+    fn public_url(&self, key: &StorageKey) -> Option<String> {
+        self.as_ref().public_url(key)
     }
 }

@@ -118,6 +118,10 @@ struct S3Args {
     /// Amazon S3 path prefix to use.
     #[structopt(long, default_value = "lfs", env = "RUDOLFS_S3_PREFIX")]
     prefix: String,
+
+    /// Logging level to use.
+    #[structopt(long = "cdn", env = "RUDOLFS_S3_CDN")]
+    cdn: Option<String>,
 }
 
 #[derive(StructOpt)]
@@ -168,7 +172,7 @@ impl S3Args {
         addr: SocketAddr,
         global_args: GlobalArgs,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let s3 = S3::new(self.bucket, self.prefix)
+        let s3 = S3::new(self.bucket, self.prefix, self.cdn)
             .map_err(Error::from)
             .await?;
 

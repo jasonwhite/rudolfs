@@ -261,7 +261,7 @@ where
 
                         let (namespace, _) = key.into_parts();
                         Ok(basic_response(
-                            uri, object, operation, size, namespace,
+                            uri, &storage, object, operation, size, namespace,
                         ))
                     }
                 });
@@ -292,8 +292,9 @@ where
     }
 }
 
-fn basic_response<E>(
+fn basic_response<E, S>(
     uri: Uri,
+    storage: &S,
     object: lfs::RequestObject,
     op: lfs::Operation,
     size: Result<Option<u64>, E>,
@@ -301,6 +302,7 @@ fn basic_response<E>(
 ) -> lfs::ResponseObject
 where
     E: fmt::Display,
+    S: Storage,
 {
     if let Ok(Some(size)) = size {
         // Ensure that the client and server agree on the size of the object.
@@ -345,7 +347,11 @@ where
         }
     };
 
-    let href = format!("{}api/{}/object/{}", uri, namespace, object.oid);
+    let href = storage
+        .public_url(&StorageKey::new(namespace.clone(), object.oid))
+        .unwrap_or_else(|| {
+            format!("{}api/{}/object/{}", uri, namespace, object.oid)
+        });
 
     let action = lfs::Action {
         href,

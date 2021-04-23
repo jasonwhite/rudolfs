@@ -113,12 +113,16 @@ pub struct Backend<C = S3Client> {
 
     /// Prefix for objects.
     prefix: String,
+
+    /// URL for the CDN. Example: https://lfscdn.myawesomegit.com
+    cdn: Option<String>,
 }
 
 impl Backend {
     pub async fn new(
         bucket: String,
         mut prefix: String,
+        cdn: Option<String>,
     ) -> Result<Self, Error> {
         // Ensure the prefix doesn't end with a '/'.
         while prefix.ends_with('/') {
@@ -164,7 +168,7 @@ impl Backend {
             S3Client::new(region)
         };
 
-        Backend::with_client(client, bucket, prefix).await
+        Backend::with_client(client, bucket, prefix, cdn).await
     }
 }
 
@@ -173,6 +177,7 @@ impl<C> Backend<C> {
         client: C,
         bucket: String,
         prefix: String,
+        cdn: Option<String>,
     ) -> Result<Self, Error>
     where
         C: S3 + Clone,
@@ -209,6 +214,7 @@ impl<C> Backend<C> {
             client,
             bucket,
             prefix,
+            cdn,
         })
     }
 
@@ -298,5 +304,13 @@ where
     /// Always returns an empty stream. This may be changed in the future.
     fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
         Box::pin(stream::empty())
+    }
+
+    fn public_url(&self, key: &StorageKey) -> Option<String> {
+        if let Some(cdn) = self.cdn.as_ref() {
+            Some(format!("{}/{}", cdn, self.key_to_path(key)))
+        } else {
+            None
+        }
     }
 }

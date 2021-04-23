@@ -387,4 +387,8 @@ where
             Some(self.max_size)
         }
     }
+
+    fn public_url(&self, key: &StorageKey) -> Option<String> {
+        self.storage.public_url(key)
+    }
 }

@@ -121,4 +121,8 @@ where
     async fn max_size(&self) -> Option<u64> {
         self.storage.max_size().await
     }
+
+    fn public_url(&self, key: &StorageKey) -> Option<String> {
+        self.storage.public_url(key)
+    }
 }
