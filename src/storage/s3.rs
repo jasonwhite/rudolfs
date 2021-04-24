@@ -24,7 +24,9 @@ use derive_more::{Display, From};
 use futures::{stream, stream::TryStreamExt};
 use http::StatusCode;
 use rusoto_core::{HttpClient, Region, RusotoError};
-use rusoto_credential::{AutoRefreshingProvider, ProvideAwsCredentials};
+use rusoto_credential::{
+    AutoRefreshingProvider, DefaultCredentialsProvider, ProvideAwsCredentials,
+};
 use rusoto_s3::{
     GetObjectError, GetObjectRequest, HeadBucketError, HeadBucketRequest,
     HeadObjectError, HeadObjectRequest, PutObjectError, PutObjectRequest,
@@ -33,6 +35,8 @@ use rusoto_s3::{
 use rusoto_sts::WebIdentityProvider;
 
 use super::{LFSObject, Storage, StorageKey, StorageStream};
+use rusoto_s3::util::{PreSignedRequest, PreSignedRequestOption};
+use tokio::time::Duration;
 
 #[derive(Debug, From, Display)]
 pub enum Error {
@@ -116,6 +120,8 @@ pub struct Backend<C = S3Client> {
 
     /// URL for the CDN. Example: https://lfscdn.myawesomegit.com
     cdn: Option<String>,
+
+    region: Region,
 }
 
 impl Backend {
@@ -162,13 +168,13 @@ impl Backend {
             S3Client::new_with(
                 HttpClient::new()?,
                 AutoRefreshingProvider::new(k8s_provider)?,
-                region,
+                region.clone(),
             )
         } else {
-            S3Client::new(region)
+            S3Client::new(region.clone())
         };
 
-        Backend::with_client(client, bucket, prefix, cdn).await
+        Backend::with_client(client, bucket, prefix, cdn, region).await
     }
 }
 
@@ -178,6 +184,7 @@ impl<C> Backend<C> {
         bucket: String,
         prefix: String,
         cdn: Option<String>,
+        region: Region,
     ) -> Result<Self, Error>
     where
         C: S3 + Clone,
@@ -215,6 +222,7 @@ impl<C> Backend<C> {
             bucket,
             prefix,
             cdn,
+            region,
         })
     }
 
@@ -312,5 +320,25 @@ where
         } else {
             None
         }
+    }
+
+    async fn upload_url(&self, key: &StorageKey) -> Option<String> {
+        let request = PutObjectRequest {
+            bucket: self.bucket.clone(),
+            key: self.key_to_path(&key),
+            ..Default::default()
+        };
+
+        let credentials_provider = DefaultCredentialsProvider::new()
+            .expect("failed to create credentials provider");
+        let credentials = credentials_provider.credentials().await.unwrap();
+        let presigned_url = request.get_presigned_url(
+            &self.region,
+            &credentials,
+            &PreSignedRequestOption {
+                expires_in: Duration::new(1800, 0),
+            },
+        );
+        Some(presigned_url)
     }
 }

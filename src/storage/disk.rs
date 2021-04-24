@@ -249,7 +249,11 @@ impl Storage for Backend {
         }))
     }
 
-    fn public_url(&self, key: &StorageKey) -> Option<String> {
+    fn public_url(&self, _key: &StorageKey) -> Option<String> {
+        None
+    }
+
+    async fn upload_url(&self, _key: &StorageKey) -> Option<String> {
         None
     }
 }

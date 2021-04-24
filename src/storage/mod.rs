@@ -227,6 +227,9 @@ pub trait Storage {
 
     /// Returns a publicly accessible URL
     fn public_url(&self, key: &StorageKey) -> Option<String>;
+
+    /// Returns a signed URL
+    async fn upload_url(&self, key: &StorageKey) -> Option<String>;
 }
 
 #[async_trait]
@@ -280,5 +283,9 @@ where
 
     fn public_url(&self, key: &StorageKey) -> Option<String> {
         self.as_ref().public_url(key)
+    }
+
+    async fn upload_url(&self, key: &StorageKey) -> Option<String> {
+        self.as_ref().upload_url(key).await
     }
 }

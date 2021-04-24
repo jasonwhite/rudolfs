@@ -262,7 +262,8 @@ where
                         let (namespace, _) = key.into_parts();
                         Ok(basic_response(
                             uri, &storage, object, operation, size, namespace,
-                        ))
+                        )
+                        .await)
                     }
                 });
 
@@ -292,7 +293,7 @@ where
     }
 }
 
-fn basic_response<E, S>(
+async fn basic_response<E, S>(
     uri: Uri,
     storage: &S,
     object: lfs::RequestObject,
@@ -347,19 +348,6 @@ where
         }
     };
 
-    let href = storage
-        .public_url(&StorageKey::new(namespace.clone(), object.oid))
-        .unwrap_or_else(|| {
-            format!("{}api/{}/object/{}", uri, namespace, object.oid)
-        });
-
-    let action = lfs::Action {
-        href,
-        header: None,
-        expires_in: None,
-        expires_at: None,
-    };
-
     match op {
         lfs::Operation::Upload => {
             // If the object does exist, then we should not return any action.
@@ -381,7 +369,23 @@ where
                     authenticated: Some(true),
                     actions: Some(lfs::Actions {
                         download: None,
-                        upload: Some(action),
+                        upload: Some(lfs::Action {
+                            href: storage
+                                .upload_url(&StorageKey::new(
+                                    namespace.clone(),
+                                    object.oid,
+                                ))
+                                .await
+                                .unwrap_or_else(|| {
+                                    format!(
+                                        "{}api/{}/object/{}",
+                                        uri, namespace, object.oid
+                                    )
+                                }),
+                            header: None,
+                            expires_in: None,
+                            expires_at: None,
+                        }),
                         verify: Some(lfs::Action {
                             href: format!(
                                 "{}api/{}/objects/verify",
@@ -405,7 +409,22 @@ where
                     error: None,
                     authenticated: Some(true),
                     actions: Some(lfs::Actions {
-                        download: Some(action),
+                        download: Some(lfs::Action {
+                            href: storage
+                                .public_url(&StorageKey::new(
+                                    namespace.clone(),
+                                    object.oid,
+                                ))
+                                .unwrap_or_else(|| {
+                                    format!(
+                                        "{}api/{}/object/{}",
+                                        uri, namespace, object.oid
+                                    )
+                                }),
+                            header: None,
+                            expires_in: None,
+                            expires_at: None,
+                        }),
                         upload: None,
                         verify: None,
                     }),

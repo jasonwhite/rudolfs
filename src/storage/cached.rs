@@ -391,4 +391,8 @@ where
     fn public_url(&self, key: &StorageKey) -> Option<String> {
         self.storage.public_url(key)
     }
+
+    async fn upload_url(&self, key: &StorageKey) -> Option<String> {
+        self.storage.upload_url(key).await
+    }
 }
