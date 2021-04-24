@@ -41,6 +41,7 @@ use std::fmt;
 use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -229,7 +230,11 @@ pub trait Storage {
     fn public_url(&self, key: &StorageKey) -> Option<String>;
 
     /// Returns a signed URL
-    async fn upload_url(&self, key: &StorageKey) -> Option<String>;
+    async fn upload_url(
+        &self,
+        key: &StorageKey,
+        expires_in: Duration,
+    ) -> Option<String>;
 }
 
 #[async_trait]
@@ -285,7 +290,11 @@ where
         self.as_ref().public_url(key)
     }
 
-    async fn upload_url(&self, key: &StorageKey) -> Option<String> {
-        self.as_ref().upload_url(key).await
+    async fn upload_url(
+        &self,
+        key: &StorageKey,
+        expires_in: Duration,
+    ) -> Option<String> {
+        self.as_ref().upload_url(key, expires_in).await
     }
 }

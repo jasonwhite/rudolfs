@@ -322,7 +322,11 @@ where
         }
     }
 
-    async fn upload_url(&self, key: &StorageKey) -> Option<String> {
+    async fn upload_url(
+        &self,
+        key: &StorageKey,
+        expires_in: Duration,
+    ) -> Option<String> {
         let request = PutObjectRequest {
             bucket: self.bucket.clone(),
             key: self.key_to_path(&key),
@@ -335,9 +339,7 @@ where
         let presigned_url = request.get_presigned_url(
             &self.region,
             &credentials,
-            &PreSignedRequestOption {
-                expires_in: Duration::new(1800, 0),
-            },
+            &PreSignedRequestOption { expires_in },
         );
         Some(presigned_url)
     }

@@ -19,6 +19,7 @@
 // SOFTWARE.
 use std::io;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use derive_more::{Display, From};
@@ -165,7 +166,11 @@ where
         self.storage.public_url(key)
     }
 
-    async fn upload_url(&self, key: &StorageKey) -> Option<String> {
-        self.storage.upload_url(key).await
+    async fn upload_url(
+        &self,
+        key: &StorageKey,
+        expires_in: Duration,
+    ) -> Option<String> {
+        self.storage.upload_url(key, expires_in).await
     }
 }

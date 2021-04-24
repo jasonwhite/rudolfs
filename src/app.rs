@@ -35,6 +35,7 @@ use crate::error::Error;
 use crate::hyperext::RequestExt;
 use crate::lfs;
 use crate::storage::{LFSObject, Namespace, Storage, StorageKey};
+use std::time::Duration;
 
 async fn from_json<T>(mut body: Body) -> Result<T, Error>
 where
@@ -371,10 +372,13 @@ where
                         download: None,
                         upload: Some(lfs::Action {
                             href: storage
-                                .upload_url(&StorageKey::new(
-                                    namespace.clone(),
-                                    object.oid,
-                                ))
+                                .upload_url(
+                                    &StorageKey::new(
+                                        namespace.clone(),
+                                        object.oid,
+                                    ),
+                                    Duration::new(30 * 60, 0),
+                                )
                                 .await
                                 .unwrap_or_else(|| {
                                     format!(
@@ -383,7 +387,7 @@ where
                                     )
                                 }),
                             header: None,
-                            expires_in: None,
+                            expires_in: Some(30 * 60),
                             expires_at: None,
                         }),
                         verify: Some(lfs::Action {

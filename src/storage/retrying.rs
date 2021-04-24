@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use backoff::{future::FutureOperation, ExponentialBackoff};
@@ -92,7 +93,11 @@ where
         self.storage.public_url(key)
     }
 
-    async fn upload_url(&self, key: &StorageKey) -> Option<String> {
-        self.storage.upload_url(key).await
+    async fn upload_url(
+        &self,
+        key: &StorageKey,
+        expires_in: Duration,
+    ) -> Option<String> {
+        self.storage.upload_url(key, expires_in).await
     }
 }
