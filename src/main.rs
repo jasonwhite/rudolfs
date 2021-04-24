@@ -72,12 +72,11 @@ enum Backend {
 #[derive(StructOpt)]
 struct GlobalArgs {
     /// Host or address to listen on.
-    #[structopt(
-        long = "host",
-        default_value = "0.0.0.0:8080",
-        env = "RUDOLFS_HOST"
-    )]
-    host: String,
+    #[structopt(long = "host", env = "RUDOLFS_HOST")]
+    host: Option<String>,
+
+    #[structopt(long = "port", default_value = "8080", env = "PORT")]
+    port: u16,
 
     /// Encryption key to use.
     #[structopt(
@@ -144,12 +143,13 @@ impl Args {
         logger_builder.init();
 
         // Find a socket address to bind to. This will resolve domain names.
-        let addr = self
-            .global
-            .host
-            .to_socket_addrs()?
-            .next()
-            .unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 8080)));
+        let addr = match self.global.host {
+            Some(ref host) => host
+                .to_socket_addrs()?
+                .next()
+                .unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 8080))),
+            None => SocketAddr::from(([0, 0, 0, 0], self.global.port)),
+        };
 
         log::info!("Initializing storage...");
 
