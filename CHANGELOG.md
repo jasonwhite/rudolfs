@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.2
+
+ - Updated `backoff` crate to fix #28
+ - Updated `askama` and `rand` crates (#30)
+
 ## v0.3.1
 
  - Added support for Kubernetes credentials (#26)
