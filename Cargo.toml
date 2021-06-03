@@ -15,7 +15,7 @@ categories = ["command-line-utilities"]
 license = "MIT"
 
 [dependencies]
-askama = "0.8"
+askama = "0.10"
 async-stream = "0.3"
 async-trait = "0.1"
 backoff = { version = "0.3", features = ["tokio"] }
@@ -33,7 +33,7 @@ hyper = { version = "0.14", features = ["server", "http1", "http2", "tcp", "stre
 linked-hash-map = { version = "0.5", features = ["serde_impl"] }
 log = "0.4"
 pretty_env_logger = "0.4"
-rand = { version = "0.7", optional = true }
+rand = { version = "0.8", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.9"
