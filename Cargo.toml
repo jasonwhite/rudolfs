@@ -18,7 +18,7 @@ license = "MIT"
 askama = "0.8"
 async-stream = "0.3"
 async-trait = "0.1"
-backoff = { version = "0.2", features = ["tokio"] }
+backoff = { version = "0.3", features = ["tokio"] }
 bytes = "1"
 chacha = "0.3"
 derive_more = "0.99"

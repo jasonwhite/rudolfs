@@ -18,7 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 use async_trait::async_trait;
-use backoff::{future::FutureOperation, ExponentialBackoff};
+use backoff::future::retry;
+use backoff::ExponentialBackoff;
 use bytes::Bytes;
 use derive_more::{Display, From};
 use futures::{stream, stream::TryStreamExt};
@@ -189,18 +190,15 @@ impl<C> Backend<C> {
 
         // We need to retry here so that any fake S3 services have a chance to
         // start up alongside Rudolfs.
-        (|| {
-            async {
-                // Note that we don't retry certain failures, like credential or
-                // missing bucket errors. These are unlikely to be transient
-                // errors.
-                c.head_bucket(req.clone())
-                    .await
-                    .map_err(InitError::from)
-                    .map_err(InitError::into_backoff)
-            }
+        retry(ExponentialBackoff::default(), || async {
+            // Note that we don't retry certain failures, like credential or
+            // missing bucket errors. These are unlikely to be transient
+            // errors.
+            c.head_bucket(req.clone())
+                .await
+                .map_err(InitError::from)
+                .map_err(InitError::into_backoff)
         })
-        .retry(ExponentialBackoff::default())
         .await?;
 
         log::info!("Successfully authorized with AWS");
