@@ -20,7 +20,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use backoff::{future::FutureOperation, ExponentialBackoff};
+use backoff::future::retry;
+use backoff::ExponentialBackoff;
 
 use super::{LFSObject, Storage, StorageKey, StorageStream};
 
@@ -65,15 +66,17 @@ where
     }
 
     async fn size(&self, key: &StorageKey) -> Result<Option<u64>, Self::Error> {
-        (|| async { Ok(self.storage.size(&key).await?) })
-            .retry(ExponentialBackoff::default())
-            .await
+        retry(ExponentialBackoff::default(), || async {
+            Ok(self.storage.size(&key).await?)
+        })
+        .await
     }
 
     async fn delete(&self, key: &StorageKey) -> Result<(), Self::Error> {
-        (|| async { Ok(self.storage.delete(&key).await?) })
-            .retry(ExponentialBackoff::default())
-            .await
+        retry(ExponentialBackoff::default(), || async {
+            Ok(self.storage.delete(&key).await?)
+        })
+        .await
     }
 
     fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
