@@ -19,6 +19,7 @@
 // SOFTWARE.
 use chacha::{ChaCha, KeyStream};
 use std::io;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
@@ -120,5 +121,17 @@ where
 
     async fn max_size(&self) -> Option<u64> {
         self.storage.max_size().await
+    }
+
+    fn public_url(&self, key: &StorageKey) -> Option<String> {
+        self.storage.public_url(key)
+    }
+
+    async fn upload_url(
+        &self,
+        key: &StorageKey,
+        expires_in: Duration,
+    ) -> Option<String> {
+        self.storage.upload_url(key, expires_in).await
     }
 }

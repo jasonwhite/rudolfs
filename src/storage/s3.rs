@@ -25,7 +25,9 @@ use derive_more::{Display, From};
 use futures::{stream, stream::TryStreamExt};
 use http::StatusCode;
 use rusoto_core::{HttpClient, Region, RusotoError};
-use rusoto_credential::{AutoRefreshingProvider, ProvideAwsCredentials};
+use rusoto_credential::{
+    AutoRefreshingProvider, DefaultCredentialsProvider, ProvideAwsCredentials,
+};
 use rusoto_s3::{
     GetObjectError, GetObjectRequest, HeadBucketError, HeadBucketRequest,
     HeadObjectError, HeadObjectRequest, PutObjectError, PutObjectRequest,
@@ -34,6 +36,8 @@ use rusoto_s3::{
 use rusoto_sts::WebIdentityProvider;
 
 use super::{LFSObject, Storage, StorageKey, StorageStream};
+use rusoto_s3::util::{PreSignedRequest, PreSignedRequestOption};
+use std::time::Duration;
 
 #[derive(Debug, From, Display)]
 pub enum Error {
@@ -109,17 +113,26 @@ pub struct Backend<C = S3Client> {
     /// S3 client.
     client: C,
 
+    // Aws Credentials. Used for signing URLs.
+    credential_provider: Box<dyn ProvideAwsCredentials + Send + Sync + 'static>,
+
     /// Name of the bucket to use.
     bucket: String,
 
     /// Prefix for objects.
     prefix: String,
+
+    /// URL for the CDN. Example: https://lfscdn.myawesomegit.com
+    cdn: Option<String>,
+
+    region: Region,
 }
 
 impl Backend {
     pub async fn new(
         bucket: String,
         mut prefix: String,
+        cdn: Option<String>,
     ) -> Result<Self, Error> {
         // Ensure the prefix doesn't end with a '/'.
         while prefix.ends_with('/') {
@@ -154,18 +167,34 @@ impl Backend {
 
         // Check if there is any k8s credential provider. If there is, use it.
         let k8s_provider = WebIdentityProvider::from_k8s_env();
-        let client = if k8s_provider.credentials().await.is_ok() {
+
+        let (client, credential_provider): (
+            S3Client,
+            Box<dyn ProvideAwsCredentials + Send + Sync + 'static>,
+        ) = if k8s_provider.credentials().await.is_ok() {
             log::info!("Using credentials from Kubernetes");
-            S3Client::new_with(
+            let provider = AutoRefreshingProvider::new(k8s_provider)?;
+            let client = S3Client::new_with(
                 HttpClient::new()?,
-                AutoRefreshingProvider::new(k8s_provider)?,
-                region,
-            )
+                provider.clone(),
+                region.clone(),
+            );
+            (client, Box::new(provider))
         } else {
-            S3Client::new(region)
+            let client = S3Client::new(region.clone());
+            let provider = DefaultCredentialsProvider::new()?;
+            (client, Box::new(provider))
         };
 
-        Backend::with_client(client, bucket, prefix).await
+        Backend::with_client(
+            client,
+            bucket,
+            prefix,
+            cdn,
+            region,
+            credential_provider,
+        )
+        .await
     }
 }
 
@@ -174,6 +203,11 @@ impl<C> Backend<C> {
         client: C,
         bucket: String,
         prefix: String,
+        cdn: Option<String>,
+        region: Region,
+        credential_provider: Box<
+            dyn ProvideAwsCredentials + Send + Sync + 'static,
+        >,
     ) -> Result<Self, Error>
     where
         C: S3 + Clone,
@@ -207,6 +241,9 @@ impl<C> Backend<C> {
             client,
             bucket,
             prefix,
+            cdn,
+            region,
+            credential_provider,
         })
     }
 
@@ -296,5 +333,38 @@ where
     /// Always returns an empty stream. This may be changed in the future.
     fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
         Box::pin(stream::empty())
+    }
+
+    fn public_url(&self, key: &StorageKey) -> Option<String> {
+        if let Some(cdn) = self.cdn.as_ref() {
+            Some(format!("{}/{}", cdn, self.key_to_path(key)))
+        } else {
+            None
+        }
+    }
+
+    async fn upload_url(
+        &self,
+        key: &StorageKey,
+        expires_in: Duration,
+    ) -> Option<String> {
+        let request = PutObjectRequest {
+            bucket: self.bucket.clone(),
+            key: self.key_to_path(&key),
+            ..Default::default()
+        };
+        let credentials = self.credential_provider.credentials().await;
+        let credentials = match credentials {
+            Ok(credentials) => credentials,
+            Err(_) => {
+                return None;
+            }
+        };
+        let presigned_url = request.get_presigned_url(
+            &self.region,
+            &credentials,
+            &PreSignedRequestOption { expires_in },
+        );
+        Some(presigned_url)
     }
 }

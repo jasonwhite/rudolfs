@@ -22,6 +22,7 @@ use std::fs::Metadata;
 use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::time::Duration;
 
 use async_stream::try_stream;
 use async_trait::async_trait;
@@ -247,6 +248,18 @@ impl Storage for Backend {
                 }
             }
         }))
+    }
+
+    fn public_url(&self, _key: &StorageKey) -> Option<String> {
+        None
+    }
+
+    async fn upload_url(
+        &self,
+        _key: &StorageKey,
+        _expires_in: Duration,
+    ) -> Option<String> {
+        None
     }
 }
 

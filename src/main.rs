@@ -71,13 +71,15 @@ enum Backend {
 
 #[derive(StructOpt)]
 struct GlobalArgs {
-    /// Host or address to listen on.
-    #[structopt(
-        long = "host",
-        default_value = "0.0.0.0:8080",
-        env = "RUDOLFS_HOST"
-    )]
-    host: String,
+    /// The host or address to listen on. If this is not specified, then
+    /// `0.0.0.0` is used where the port can be specified with `--port`
+    /// (port 8080 is used by default if that is also not specified).
+    #[structopt(long = "host", env = "RUDOLFS_HOST")]
+    host: Option<String>,
+
+    /// The port to bind to. This is only used if `--host` is not specified.
+    #[structopt(long = "port", default_value = "8080", env = "PORT")]
+    port: u16,
 
     /// Encryption key to use.
     #[structopt(
@@ -119,6 +121,11 @@ struct S3Args {
     /// Amazon S3 path prefix to use.
     #[structopt(long, default_value = "lfs", env = "RUDOLFS_S3_PREFIX")]
     prefix: String,
+
+    /// The base URL of your CDN. If specified, then all download URLs will be
+    /// prefixed with this URL.
+    #[structopt(long = "cdn", env = "RUDOLFS_S3_CDN")]
+    cdn: Option<String>,
 }
 
 #[derive(StructOpt)]
@@ -144,12 +151,13 @@ impl Args {
         logger_builder.init();
 
         // Find a socket address to bind to. This will resolve domain names.
-        let addr = self
-            .global
-            .host
-            .to_socket_addrs()?
-            .next()
-            .unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 8080)));
+        let addr = match self.global.host {
+            Some(ref host) => host
+                .to_socket_addrs()?
+                .next()
+                .unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 8080))),
+            None => SocketAddr::from(([0, 0, 0, 0], self.global.port)),
+        };
 
         log::info!("Initializing storage...");
 
@@ -168,7 +176,7 @@ impl S3Args {
         addr: SocketAddr,
         global_args: GlobalArgs,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let s3 = S3::new(self.bucket, self.prefix)
+        let s3 = S3::new(self.bucket, self.prefix, self.cdn)
             .map_err(Error::from)
             .await?;
 

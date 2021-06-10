@@ -35,6 +35,9 @@ use crate::error::Error;
 use crate::hyperext::RequestExt;
 use crate::lfs;
 use crate::storage::{LFSObject, Namespace, Storage, StorageKey};
+use std::time::Duration;
+
+const UPLOAD_EXPIRATION: Duration = Duration::from_secs(30 * 60);
 
 async fn from_json<T>(mut body: Body) -> Result<T, Error>
 where
@@ -261,8 +264,9 @@ where
 
                         let (namespace, _) = key.into_parts();
                         Ok(basic_response(
-                            uri, object, operation, size, namespace,
-                        ))
+                            uri, &storage, object, operation, size, namespace,
+                        )
+                        .await)
                     }
                 });
 
@@ -292,8 +296,9 @@ where
     }
 }
 
-fn basic_response<E>(
+async fn basic_response<E, S>(
     uri: Uri,
+    storage: &S,
     object: lfs::RequestObject,
     op: lfs::Operation,
     size: Result<Option<u64>, E>,
@@ -301,6 +306,7 @@ fn basic_response<E>(
 ) -> lfs::ResponseObject
 where
     E: fmt::Display,
+    S: Storage,
 {
     if let Ok(Some(size)) = size {
         // Ensure that the client and server agree on the size of the object.
@@ -345,21 +351,13 @@ where
         }
     };
 
-    let href = format!("{}api/{}/object/{}", uri, namespace, object.oid);
-
-    let action = lfs::Action {
-        href,
-        header: None,
-        expires_in: None,
-        expires_at: None,
-    };
-
     match op {
         lfs::Operation::Upload => {
             // If the object does exist, then we should not return any action.
             //
             // If the object does not exist, then we should return an upload
             // action.
+            let upload_expiry_secs = UPLOAD_EXPIRATION.as_secs() as i32;
             match size {
                 Some(size) => lfs::ResponseObject {
                     oid: object.oid,
@@ -375,7 +373,26 @@ where
                     authenticated: Some(true),
                     actions: Some(lfs::Actions {
                         download: None,
-                        upload: Some(action),
+                        upload: Some(lfs::Action {
+                            href: storage
+                                .upload_url(
+                                    &StorageKey::new(
+                                        namespace.clone(),
+                                        object.oid,
+                                    ),
+                                    UPLOAD_EXPIRATION,
+                                )
+                                .await
+                                .unwrap_or_else(|| {
+                                    format!(
+                                        "{}api/{}/object/{}",
+                                        uri, namespace, object.oid
+                                    )
+                                }),
+                            header: None,
+                            expires_in: Some(upload_expiry_secs),
+                            expires_at: None,
+                        }),
                         verify: Some(lfs::Action {
                             href: format!(
                                 "{}api/{}/objects/verify",
@@ -399,7 +416,22 @@ where
                     error: None,
                     authenticated: Some(true),
                     actions: Some(lfs::Actions {
-                        download: Some(action),
+                        download: Some(lfs::Action {
+                            href: storage
+                                .public_url(&StorageKey::new(
+                                    namespace.clone(),
+                                    object.oid,
+                                ))
+                                .unwrap_or_else(|| {
+                                    format!(
+                                        "{}api/{}/object/{}",
+                                        uri, namespace, object.oid
+                                    )
+                                }),
+                            header: None,
+                            expires_in: None,
+                            expires_at: None,
+                        }),
                         upload: None,
                         verify: None,
                     }),
