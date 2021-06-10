@@ -112,6 +112,9 @@ pub struct Backend<C = S3Client> {
     /// S3 client.
     client: C,
 
+    // Aws Credentials. Used for signing URLs.
+    credential_provider: Box<dyn ProvideAwsCredentials + Send + Sync + 'static>,
+
     /// Name of the bucket to use.
     bucket: String,
 
@@ -163,18 +166,34 @@ impl Backend {
 
         // Check if there is any k8s credential provider. If there is, use it.
         let k8s_provider = WebIdentityProvider::from_k8s_env();
-        let client = if k8s_provider.credentials().await.is_ok() {
+
+        let (client, credential_provider): (
+            S3Client,
+            Box<dyn ProvideAwsCredentials + Send + Sync + 'static>,
+        ) = if k8s_provider.credentials().await.is_ok() {
             log::info!("Using credentials from Kubernetes");
-            S3Client::new_with(
+            let provider = AutoRefreshingProvider::new(k8s_provider)?;
+            let client = S3Client::new_with(
                 HttpClient::new()?,
-                AutoRefreshingProvider::new(k8s_provider)?,
+                provider.clone(),
                 region.clone(),
-            )
+            );
+            (client, Box::new(provider))
         } else {
-            S3Client::new(region.clone())
+            let client = S3Client::new(region.clone());
+            let provider = DefaultCredentialsProvider::new()?;
+            (client, Box::new(provider))
         };
 
-        Backend::with_client(client, bucket, prefix, cdn, region).await
+        Backend::with_client(
+            client,
+            bucket,
+            prefix,
+            cdn,
+            region,
+            credential_provider,
+        )
+        .await
     }
 }
 
@@ -185,6 +204,9 @@ impl<C> Backend<C> {
         prefix: String,
         cdn: Option<String>,
         region: Region,
+        credential_provider: Box<
+            dyn ProvideAwsCredentials + Send + Sync + 'static,
+        >,
     ) -> Result<Self, Error>
     where
         C: S3 + Clone,
@@ -223,6 +245,7 @@ impl<C> Backend<C> {
             prefix,
             cdn,
             region,
+            credential_provider,
         })
     }
 
@@ -332,10 +355,13 @@ where
             key: self.key_to_path(&key),
             ..Default::default()
         };
-
-        let credentials_provider = DefaultCredentialsProvider::new()
-            .expect("failed to create credentials provider");
-        let credentials = credentials_provider.credentials().await.unwrap();
+        let credentials = self.credential_provider.credentials().await;
+        let credentials = match credentials {
+            Ok(credentials) => credentials,
+            Err(_) => {
+                return None;
+            }
+        };
         let presigned_url = request.get_presigned_url(
             &self.region,
             &credentials,

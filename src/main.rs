@@ -71,13 +71,12 @@ enum Backend {
 
 #[derive(StructOpt)]
 struct GlobalArgs {
-    /// The host or address to listen on. If this is not specified, then `0.0.0.0`
-    /// is used where the port can be specified with `--port` (port 8080 is used by
-    /// default if that is also not specified).
+    /// The host or address to listen on. If this is not specified, then
+    /// `0.0.0.0` is used where the port can be specified with `--port`
+    /// (port 8080 is used by default if that is also not specified).
     #[structopt(long = "host", env = "RUDOLFS_HOST")]
     host: Option<String>,
 
-    
     /// The port to bind to. This is only used if `--host` is not specified.
     #[structopt(long = "port", default_value = "8080", env = "PORT")]
     port: u16,
