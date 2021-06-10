@@ -37,6 +37,8 @@ use crate::lfs;
 use crate::storage::{LFSObject, Namespace, Storage, StorageKey};
 use std::time::Duration;
 
+const UPLOAD_EXPIRATION: Duration = Duration::from_secs(30 * 60);
+
 async fn from_json<T>(mut body: Body) -> Result<T, Error>
 where
     T: for<'de> Deserialize<'de>,
@@ -377,7 +379,7 @@ where
                                         namespace.clone(),
                                         object.oid,
                                     ),
-                                    Duration::new(30 * 60, 0),
+                                    UPLOAD_EXPIRATION,
                                 )
                                 .await
                                 .unwrap_or_else(|| {
@@ -387,7 +389,7 @@ where
                                     )
                                 }),
                             header: None,
-                            expires_in: Some(30 * 60),
+                            expires_in: Some(UPLOAD_EXPIRATION.as_secs() as i32),
                             expires_at: None,
                         }),
                         verify: Some(lfs::Action {

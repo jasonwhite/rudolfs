@@ -36,7 +36,7 @@ use rusoto_sts::WebIdentityProvider;
 
 use super::{LFSObject, Storage, StorageKey, StorageStream};
 use rusoto_s3::util::{PreSignedRequest, PreSignedRequestOption};
-use tokio::time::Duration;
+use std::time::Duration;
 
 #[derive(Debug, From, Display)]
 pub enum Error {
