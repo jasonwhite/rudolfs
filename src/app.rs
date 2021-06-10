@@ -357,6 +357,7 @@ where
             //
             // If the object does not exist, then we should return an upload
             // action.
+            let upload_expiry_secs = UPLOAD_EXPIRATION.as_secs() as i32;
             match size {
                 Some(size) => lfs::ResponseObject {
                     oid: object.oid,
@@ -389,7 +390,7 @@ where
                                     )
                                 }),
                             header: None,
-                            expires_in: Some(UPLOAD_EXPIRATION.as_secs() as i32),
+                            expires_in: Some(upload_expiry_secs),
                             expires_at: None,
                         }),
                         verify: Some(lfs::Action {
