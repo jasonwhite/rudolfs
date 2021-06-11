@@ -39,6 +39,9 @@ use super::{LFSObject, Storage, StorageKey, StorageStream};
 use rusoto_s3::util::{PreSignedRequest, PreSignedRequestOption};
 use std::time::Duration;
 
+type BoxedCredentialProvider =
+    Box<dyn ProvideAwsCredentials + Send + Sync + 'static>;
+
 #[derive(Debug, From, Display)]
 pub enum Error {
     Get(RusotoError<GetObjectError>),
@@ -113,8 +116,8 @@ pub struct Backend<C = S3Client> {
     /// S3 client.
     client: C,
 
-    // Aws Credentials. Used for signing URLs.
-    credential_provider: Box<dyn ProvideAwsCredentials + Send + Sync + 'static>,
+    // AWS Credentials. Used for signing URLs.
+    credential_provider: BoxedCredentialProvider,
 
     /// Name of the bucket to use.
     bucket: String,
@@ -168,23 +171,21 @@ impl Backend {
         // Check if there is any k8s credential provider. If there is, use it.
         let k8s_provider = WebIdentityProvider::from_k8s_env();
 
-        let (client, credential_provider): (
-            S3Client,
-            Box<dyn ProvideAwsCredentials + Send + Sync + 'static>,
-        ) = if k8s_provider.credentials().await.is_ok() {
-            log::info!("Using credentials from Kubernetes");
-            let provider = AutoRefreshingProvider::new(k8s_provider)?;
-            let client = S3Client::new_with(
-                HttpClient::new()?,
-                provider.clone(),
-                region.clone(),
-            );
-            (client, Box::new(provider))
-        } else {
-            let client = S3Client::new(region.clone());
-            let provider = DefaultCredentialsProvider::new()?;
-            (client, Box::new(provider))
-        };
+        let (client, credential_provider): (_, BoxedCredentialProvider) =
+            if k8s_provider.credentials().await.is_ok() {
+                log::info!("Using credentials from Kubernetes");
+                let provider = AutoRefreshingProvider::new(k8s_provider)?;
+                let client = S3Client::new_with(
+                    HttpClient::new()?,
+                    provider.clone(),
+                    region.clone(),
+                );
+                (client, Box::new(provider))
+            } else {
+                let client = S3Client::new(region.clone());
+                let provider = DefaultCredentialsProvider::new()?;
+                (client, Box::new(provider))
+            };
 
         Backend::with_client(
             client,
@@ -205,9 +206,7 @@ impl<C> Backend<C> {
         prefix: String,
         cdn: Option<String>,
         region: Region,
-        credential_provider: Box<
-            dyn ProvideAwsCredentials + Send + Sync + 'static,
-        >,
+        credential_provider: BoxedCredentialProvider,
     ) -> Result<Self, Error>
     where
         C: S3 + Clone,
@@ -353,13 +352,7 @@ where
             key: self.key_to_path(&key),
             ..Default::default()
         };
-        let credentials = self.credential_provider.credentials().await;
-        let credentials = match credentials {
-            Ok(credentials) => credentials,
-            Err(_) => {
-                return None;
-            }
-        };
+        let credentials = self.credential_provider.credentials().await.ok()?;
         let presigned_url = request.get_presigned_url(
             &self.region,
             &credentials,
