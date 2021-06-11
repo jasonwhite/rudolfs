@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.3
+
+ - Added S3 signed URL support (#27)
+
 ## v0.3.2
 
  - Updated `backoff` crate to fix #28
