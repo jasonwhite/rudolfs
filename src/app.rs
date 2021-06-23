@@ -114,6 +114,9 @@ where
         assert_eq!(parts.next(), Some("api"));
 
         // Extract the namespace.
+        // namespace format:
+        // repo/lfs/objects/xx/xx/xxxxxxxxxxxxxxxxxxxxxxxxx
+        // then namespace is : (repo, lfs)
         let namespace = match (parts.next(), parts.next()) {
             (Some(org), Some(project)) => {
                 Namespace::new(org.into(), project.into())

@@ -35,7 +35,7 @@ pub struct Backend<S> {
 
 impl<S> Backend<S> {
     pub fn new(key: [u8; 32], storage: S) -> Self {
-        Backend { key, storage }
+        Backend { storage, key }
     }
 }
 

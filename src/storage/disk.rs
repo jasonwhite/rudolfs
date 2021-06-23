@@ -52,7 +52,7 @@ impl Backend {
     // tree data structure.
     fn key_to_path(&self, key: &StorageKey) -> PathBuf {
         self.root.join(format!(
-            "objects/{}/{}",
+            "{}/objects/{}",
             key.namespace(),
             key.oid().path()
         ))
@@ -131,7 +131,7 @@ impl Storage for Backend {
     async fn size(&self, key: &StorageKey) -> Result<Option<u64>, Self::Error> {
         let path = self.key_to_path(key);
 
-        fs::metadata(path)
+        fs::metadata(&path)
             .await
             .map(move |metadata| Some(metadata.len()))
             .or_else(move |err| match err.kind() {

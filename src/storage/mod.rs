@@ -65,7 +65,7 @@ pub type ByteStream = Pin<
 /// A namespace is used to categorize stored LFS objects. The storage
 /// implementation is free to ignore this. However, it can be useful when
 /// pruning old LFS objects from permanent storage.
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct Namespace {
     org: String,
     project: String,
@@ -106,7 +106,7 @@ pub struct StorageKey {
 
 impl StorageKey {
     pub fn new(namespace: Namespace, oid: Oid) -> Self {
-        StorageKey { oid, namespace }
+        StorageKey { namespace, oid }
     }
 
     pub fn into_parts(self) -> (Namespace, Oid) {

@@ -74,8 +74,8 @@ struct GlobalArgs {
     /// The host or address to listen on. If this is not specified, then
     /// `0.0.0.0` is used where the port can be specified with `--port`
     /// (port 8080 is used by default if that is also not specified).
-    #[structopt(long = "host", env = "RUDOLFS_HOST")]
-    host: Option<String>,
+    #[structopt(long = "host", env = "RUDOLFS_HOST", default_value="0.0.0.0")]
+    host: String,
 
     /// The port to bind to. This is only used if `--host` is not specified.
     #[structopt(long = "port", default_value = "8080", env = "PORT")]
@@ -151,19 +151,19 @@ impl Args {
         logger_builder.init();
 
         // Find a socket address to bind to. This will resolve domain names.
-        let addr = match self.global.host {
-            Some(ref host) => host
-                .to_socket_addrs()?
-                .next()
-                .unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 8080))),
-            None => SocketAddr::from(([0, 0, 0, 0], self.global.port)),
-        };
-
+        let ret = self.global.host.to_socket_addrs();
+        let mut addr = None;
+        if ret.is_err(){
+            let hostAddr = format!("{}:{}", self.global.host, self.global.port);
+            addr = Some(hostAddr.to_socket_addrs()?.next().unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 8080))));
+        } else {
+            addr = Some(ret.unwrap().next().unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 8080))));
+        }
         log::info!("Initializing storage...");
 
         match self.backend {
-            Backend::S3(s3) => s3.run(addr, self.global).await?,
-            Backend::Local(local) => local.run(addr, self.global).await?,
+            Backend::S3(s3) => s3.run(addr.unwrap(), self.global).await?,
+            Backend::Local(local) => local.run(addr.unwrap(), self.global).await?,
         }
 
         Ok(())
@@ -223,7 +223,8 @@ impl LocalArgs {
         global_args: GlobalArgs,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let storage = Disk::new(self.path).map_err(Error::from).await?;
-        let storage = Verify::new(Encrypted::new(global_args.key, storage));
+        //fix me: for mirroring repo the key is not right for the origin repo
+        //let storage = Verify::new(Encrypted::new(global_args.key, storage));
 
         log::info!("Local disk storage initialized.");
 

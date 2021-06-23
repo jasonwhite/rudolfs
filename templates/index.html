@@ -17,6 +17,9 @@
         <p><pre class="code">[lfs]
 url = "{{ api }}/my-org/my-repo"</pre></p>
         <p>...where <code>my-org/my-repo</code> is the name of the Git repository.</p>
+        <p>If the lfs data dir is inside remote bare repo, then url should be some like this:</P>
+         <p><pre class="code">[lfs]
+                url = "{{ api }}/your-remote-bare-repo/lfs"</pre></p> 
         <p>Make sure <code>.lfsconfig</code> is committed:</p>
         <p><pre class="code">git add .lfsconfig</pre></p>
     </li>
