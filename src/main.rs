@@ -89,9 +89,9 @@ struct GlobalArgs {
     #[structopt(
         long = "key",
         parse(try_from_str = FromHex::from_hex),
-        env = "RUDOLFS_KEY"
+        env = "RUDOLFS_KEY",
     )]
-    key: [u8; 32],
+    key: Option<[u8; 32]>,
 
     /// Root directory of the object cache. If not specified or if the local
     /// disk is the storage backend, then no local disk cache will be used.
@@ -217,12 +217,22 @@ impl S3Args {
                 let disk = Faulty::new(disk);
 
                 let cache = Cached::new(max_cache_size, disk, s3).await?;
-                let storage =
-                    Verify::new(Encrypted::new(global_args.key, cache));
-                run_server(storage, &addr).await?;
+                if global_args.key.is_none() {
+                    run_server(cache, &addr).await?;
+                } else {
+                    let storage = Verify::new(Encrypted::new(
+                        global_args.key.unwrap(),
+                        cache,
+                    ));
+                    run_server(storage, &addr).await?;
+                }
             }
             None => {
-                let storage = Verify::new(Encrypted::new(global_args.key, s3));
+                if global_args.key.is_none() {
+                    return Err(Box::new(error::VerifyKeyInvalidError {}));
+                }
+                let storage =
+                    Verify::new(Encrypted::new(global_args.key.unwrap(), s3));
                 run_server(storage, &addr).await?;
             }
         }
@@ -238,12 +248,17 @@ impl LocalArgs {
         global_args: GlobalArgs,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let storage = Disk::new(self.path).map_err(Error::from).await?;
-        // fix me: for mirroring repo the key is not right for the origin repo
-        // let storage = Verify::new(Encrypted::new(global_args.key, storage));
 
         log::info!("Local disk storage initialized.");
+        // fix me: for mirroring repo the key is not right for the origin repo
+        if global_args.key.is_none() {
+            run_server(storage, &addr).await?;
+        } else {
+            let storage =
+                Verify::new(Encrypted::new(global_args.key.unwrap(), storage));
+            run_server(storage, &addr).await?;
+        }
 
-        run_server(storage, &addr).await?;
         Ok(())
     }
 }

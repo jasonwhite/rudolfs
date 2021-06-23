@@ -17,12 +17,20 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+use std::fmt;
 use std::io;
-
-use derive_more::{Display, From};
 
 use crate::sha256::{Sha256Error, Sha256VerifyError};
 use crate::storage::{self, Storage};
+
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Default)]
+pub struct VerifyKeyInvalidError {}
+impl std::error::Error for VerifyKeyInvalidError {}
+impl fmt::Display for VerifyKeyInvalidError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "--key key required",)
+    }
+}
 
 // Define a type so we can return multiple types of errors
 #[derive(Debug, From, Display)]
