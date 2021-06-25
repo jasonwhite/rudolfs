@@ -27,6 +27,7 @@ test_task:
   cargo_cache:
     folder: $CARGO_HOME/registry
     fingerprint_script: cat Cargo.lock
+  install_script: cd $(mktemp -d) && curl -Ls https://github.com/git-lfs/git-lfs/releases/download/v2.13.3/git-lfs-linux-amd64-v2.13.3.tar.gz | tar xvz && ./install.sh
   build_script: cargo build
   test_script: cargo test
   before_cache_script: rm -rf $CARGO_HOME/registry/index

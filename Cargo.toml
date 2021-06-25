@@ -43,6 +43,12 @@ tokio-util = { version = "0.6", features = ["full"] }
 url = "2"
 uuid = { version = "0.8", features = ["v4"] }
 
+[dev-dependencies]
+rand = "0.8"
+tempfile = "3"
+duct = "0.13"
+env_logger = "0.8"
+
 [dependencies.rusoto_core]
 version = "0.46"
 default_features = false
