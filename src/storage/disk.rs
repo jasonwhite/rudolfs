@@ -156,18 +156,18 @@ impl Storage for Backend {
     ///
     /// The directory structure is assumed to be like this:
     ///
-    ///     objects/{org}/{project}/
-    ///     ├── 00
-    ///     │   ├── 07
-    ///     │   │   └── 0007941906960...
-    ///     │   └── ff
-    ///     │       └── 00ff9e9c69224...
-    ///     ├── 01
-    ///     │   ├── 89
-    ///     │   │   └── 0189e5fd19477...
-    ///     │   └── f5
-    ///     │       └── 01f5c45c65e62...
-    ///                 ^^^^
+    ///   objects/{org}/{project}/
+    ///   ├── 00
+    ///   │   ├── 07
+    ///   │   │   └── 0007941906960...
+    ///   │   └── ff
+    ///   │       └── 00ff9e9c69224...
+    ///   ├── 01
+    ///   │   ├── 89
+    ///   │   │   └── 0189e5fd19477...
+    ///   │   └── f5
+    ///   │       └── 01f5c45c65e62...
+    ///               ^^^^
     ///
     /// Note that the first four characters are repeated in the file name so
     /// that transforming the file name into an object ID is simpler.
