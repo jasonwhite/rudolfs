@@ -55,7 +55,8 @@ impl<B> RequestExt for Request<B> {
 
     fn authority(&self) -> Option<Authority> {
         self.headers()
-            .get(":authority")
+            .get("X-Forwarded-Host")
+            .or_else(|| self.headers().get(":authority"))
             .or_else(|| self.headers().get("Host"))
             .and_then(|authority| {
                 Authority::try_from(authority.as_bytes()).ok()

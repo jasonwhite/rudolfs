@@ -1,5 +1,9 @@
 # Changelog
 
+## WIP: v0.3.5
+
+ - Support X-Forwarded-Host headers to work better with load balancers. #31
+
 ## v0.3.4
 
  - Fixed the S3 backend: 1c0d6c7e2638963e6755669c6013daae2fe47ee7
