@@ -17,8 +17,27 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+
+//! This integration test only runs if the file `.test_credentials.toml` is in
+//! the same directory. Otherwise, it succeeds and does nothing.
+//!
+//! To run this test, create `tests/.test_credentials.toml` with the following
+//! contents:
+//!
+//! ```toml
+//! access_key_id = "XXXXXXXXXXXXXXXXXXXX"
+//! secret_access_key = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+//! default_region = "us-east-1"
+//! bucket = "my-test-bucket"
+//! ```
+//!
+//! Be sure to *only* use non-production credentials for testing purposes. We
+//! intentionally do not load the credentials from the environment to avoid
+//! clobbering any existing S3 bucket.
+
 mod common;
 
+use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
 
@@ -26,23 +45,51 @@ use futures::future::Either;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rudolfs::{LocalServerBuilder, Server};
+use rudolfs::S3ServerBuilder;
+use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use common::{init_logger, GitRepo};
 
+#[derive(Debug, Serialize, Deserialize)]
+struct Credentials {
+    access_key_id: String,
+    secret_access_key: String,
+    default_region: String,
+    bucket: String,
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn local_smoke_test() -> Result<(), Box<dyn std::error::Error>> {
+async fn s3_smoke_test() -> Result<(), Box<dyn std::error::Error>> {
     init_logger();
 
-    // Make sure our seed is deterministic. This makes it easier to reproduce
-    // the same repo every time.
+    let config = match fs::read("tests/.test_credentials.toml") {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!("Skipping test. No S3 credentials available: {}", err);
+            return Ok(());
+        }
+    };
+
+    // Try to load S3 credentials `.test_credentials.toml`. If they don't exist,
+    // then we can't really run this test. Note that these should be completely
+    // separate credentials than what is used in production.
+    let creds: Credentials = toml::from_slice(&config)?;
+
+    std::env::set_var("AWS_ACCESS_KEY_ID", creds.access_key_id);
+    std::env::set_var("AWS_SECRET_ACCESS_KEY", creds.secret_access_key);
+    std::env::set_var("AWS_DEFAULT_REGION", creds.default_region);
+
+    // Make sure our seed is deterministic. This prevents us from filling up our
+    // S3 bucket with a bunch of random files if this test gets ran a bunch of
+    // times.
     let mut rng = StdRng::seed_from_u64(42);
 
-    let data = tempfile::TempDir::new()?;
     let key = rng.gen();
 
-    let server = LocalServerBuilder::new(data.path().into(), key);
+    let mut server = S3ServerBuilder::new(creds.bucket, key);
+    server.prefix("test_lfs".into());
+
     let server = server.spawn(SocketAddr::from(([0, 0, 0, 0], 0))).await?;
     let addr = server.addr();
 
@@ -57,20 +104,20 @@ async fn local_smoke_test() -> Result<(), Box<dyn std::error::Error>> {
     repo.commit("Add LFS objects")?;
 
     // Make sure we can push LFS objects to the server.
-    repo.lfs_push()?;
+    repo.lfs_push().unwrap();
 
     // Make sure we can re-download the same objects.
-    repo.clean_lfs()?;
-    repo.lfs_pull()?;
+    repo.clean_lfs().unwrap();
+    repo.lfs_pull().unwrap();
 
     // Push again. This should be super fast.
-    repo.lfs_push()?;
+    repo.lfs_push().unwrap();
 
     shutdown_tx.send(()).expect("server died too soon");
 
-    if let Either::Right((result, _)) = server.await? {
+    if let Either::Right((result, _)) = server.await.unwrap() {
         // If the server exited first, then propagate the error.
-        result?;
+        result.expect("server failed unexpectedly");
     }
 
     Ok(())

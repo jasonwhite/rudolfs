@@ -347,6 +347,12 @@ where
         key: &StorageKey,
         expires_in: Duration,
     ) -> Option<String> {
+        // Don't use a presigned URL if we're not using a CDN. Otherwise,
+        // uploads will bypass the encryption process and fail to download.
+        if self.cdn.is_none() {
+            return None;
+        }
+
         let request = PutObjectRequest {
             bucket: self.bucket.clone(),
             key: self.key_to_path(&key),

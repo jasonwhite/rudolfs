@@ -132,10 +132,25 @@ impl S3ServerBuilder {
     /// Spawns the server. The server must be awaited on in order to accept
     /// incoming client connections and run.
     pub async fn spawn(
-        self,
+        mut self,
         addr: SocketAddr,
-    ) -> Result<Box<dyn Server + Unpin>, Box<dyn std::error::Error>> {
+    ) -> Result<Box<dyn Server + Unpin + Send>, Box<dyn std::error::Error>>
+    {
         let prefix = self.prefix.unwrap_or_else(|| String::from("lfs"));
+
+        if self.cdn.is_some() {
+            log::warn!(
+                "A CDN was specified. Since uploads and downloads do not flow \
+                 through Rudolfs in this case, they will *not* be encrypted."
+            );
+
+            if let Some(_) = self.cache.take() {
+                log::warn!(
+                    "A local disk cache does not work with a CDN and will be \
+                     disabled."
+                );
+            }
+        }
 
         let s3 = S3::new(self.bucket, prefix, self.cdn)
             .map_err(Error::from)
