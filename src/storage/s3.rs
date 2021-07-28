@@ -29,13 +29,12 @@ use rusoto_credential::{
     AutoRefreshingProvider, DefaultCredentialsProvider, ProvideAwsCredentials,
 };
 use rusoto_s3::{
-    GetObjectError, GetObjectRequest, HeadBucketError, HeadBucketRequest,
-    HeadObjectError, HeadObjectRequest, PutObjectError, PutObjectRequest,
-    CreateMultipartUploadError, CreateMultipartUploadRequest,
-    UploadPartError, UploadPartRequest,
-    CompletedPart, CompletedMultipartUpload,
     CompleteMultipartUploadError, CompleteMultipartUploadRequest,
-    S3Client, StreamingBody, S3,
+    CompletedMultipartUpload, CompletedPart, CreateMultipartUploadError,
+    CreateMultipartUploadRequest, GetObjectError, GetObjectRequest,
+    HeadBucketError, HeadBucketRequest, HeadObjectError, HeadObjectRequest,
+    PutObjectError, PutObjectRequest, S3Client, StreamingBody, UploadPartError,
+    UploadPartRequest, S3,
 };
 use rusoto_sts::WebIdentityProvider;
 use tokio::io::AsyncReadExt;
@@ -301,7 +300,8 @@ where
             key: self.key_to_path(&key),
             ..Default::default()
         };
-        let mu_response = self.client.create_multipart_upload(mu_request).await?;
+        let mu_response =
+            self.client.create_multipart_upload(mu_request).await?;
         let upload_id = mu_response.upload_id.unwrap();
 
         const CHUNK_SIZE: usize = 102_400_000;
@@ -330,7 +330,7 @@ where
 
                 completed_parts.push(CompletedPart {
                     e_tag: up_response.e_tag.clone(),
-                    part_number: Some(part_number)
+                    part_number: Some(part_number),
                 });
 
                 if size == 0 {
@@ -347,7 +347,9 @@ where
         let cm_request = CompleteMultipartUploadRequest {
             bucket: self.bucket.clone(),
             key: self.key_to_path(&key),
-            multipart_upload: Some(CompletedMultipartUpload { parts: Some(completed_parts) }),
+            multipart_upload: Some(CompletedMultipartUpload {
+                parts: Some(completed_parts),
+            }),
             upload_id: upload_id.clone(),
             ..Default::default()
         };
