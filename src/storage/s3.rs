@@ -31,9 +31,14 @@ use rusoto_credential::{
 use rusoto_s3::{
     GetObjectError, GetObjectRequest, HeadBucketError, HeadBucketRequest,
     HeadObjectError, HeadObjectRequest, PutObjectError, PutObjectRequest,
+    CreateMultipartUploadError, CreateMultipartUploadRequest,
+    UploadPartError, UploadPartRequest,
+    CompletedPart, CompletedMultipartUpload,
+    CompleteMultipartUploadError, CompleteMultipartUploadRequest,
     S3Client, StreamingBody, S3,
 };
 use rusoto_sts::WebIdentityProvider;
+use tokio::io::AsyncReadExt;
 
 use super::{LFSObject, Storage, StorageKey, StorageStream};
 use rusoto_s3::util::{PreSignedRequest, PreSignedRequestOption};
@@ -46,7 +51,12 @@ type BoxedCredentialProvider =
 pub enum Error {
     Get(RusotoError<GetObjectError>),
     Put(RusotoError<PutObjectError>),
+    CreateMultipart(RusotoError<CreateMultipartUploadError>),
+    Upload(RusotoError<UploadPartError>),
+    CompleteMultipart(RusotoError<CompleteMultipartUploadError>),
     Head(RusotoError<HeadObjectError>),
+
+    Stream(std::io::Error),
 
     /// Initialization error.
     Init(InitError),
@@ -284,17 +294,64 @@ where
         key: StorageKey,
         value: LFSObject,
     ) -> Result<(), Self::Error> {
-        let (len, stream) = value.into_parts();
+        let (_len, stream) = value.into_parts();
 
-        let request = PutObjectRequest {
+        let mu_request = CreateMultipartUploadRequest {
             bucket: self.bucket.clone(),
             key: self.key_to_path(&key),
-            content_length: Some(len as i64),
-            body: Some(StreamingBody::new(stream)),
             ..Default::default()
         };
+        let mu_response = self.client.create_multipart_upload(mu_request).await?;
+        let upload_id = mu_response.upload_id.unwrap();
 
-        self.client.put_object(request).await?;
+        const CHUNK_SIZE: usize = 102_400_000;
+        const BUF_SIZE: usize = 1024;
+        let mut buffer = Vec::with_capacity(CHUNK_SIZE);
+        let mut read_buffer = [0; BUF_SIZE];
+        let mut part_number = 1;
+        let mut completed_parts = Vec::new();
+        let mut streaming_body = StreamingBody::new(stream).into_async_read();
+
+        loop {
+            let size = streaming_body.read(&mut read_buffer).await?;
+            buffer.append(&mut read_buffer[..size].to_vec());
+
+            if buffer.len() >= CHUNK_SIZE || size == 0 {
+                let up_request = UploadPartRequest {
+                    content_length: Some(buffer.len() as i64),
+                    body: Some(StreamingBody::from(buffer)),
+                    bucket: self.bucket.clone(),
+                    key: self.key_to_path(&key),
+                    part_number,
+                    upload_id: upload_id.clone(),
+                    ..Default::default()
+                };
+                let up_response = self.client.upload_part(up_request).await?;
+
+                completed_parts.push(CompletedPart {
+                    e_tag: up_response.e_tag.clone(),
+                    part_number: Some(part_number)
+                });
+
+                if size == 0 {
+                    // The stream has ended.
+                    break;
+                } else {
+                    part_number = part_number + 1;
+                    let next_buffer = Vec::with_capacity(CHUNK_SIZE);
+                    buffer = next_buffer;
+                }
+            }
+        }
+
+        let cm_request = CompleteMultipartUploadRequest {
+            bucket: self.bucket.clone(),
+            key: self.key_to_path(&key),
+            multipart_upload: Some(CompletedMultipartUpload { parts: Some(completed_parts) }),
+            upload_id: upload_id.clone(),
+            ..Default::default()
+        };
+        self.client.complete_multipart_upload(cm_request).await?;
 
         Ok(())
     }
