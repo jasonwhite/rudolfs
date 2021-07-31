@@ -1,8 +1,11 @@
 # Changelog
 
-## WIP: v0.3.5
+## v0.3.5
 
- - Support X-Forwarded-Host headers to work better with load balancers. #31
+ - Support the `X-Forwarded-Host` header to work better with load balancers.
+   (#31)
+ - Support multipart S3 uploads for object sizes larger than 5GB. (#36)
+   - Large uploads should also be more reliable for flaky S3 connections.
 
 ## v0.3.4
 
