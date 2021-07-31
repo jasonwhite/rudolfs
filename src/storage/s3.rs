@@ -20,10 +20,11 @@
 use async_trait::async_trait;
 use backoff::future::retry;
 use backoff::ExponentialBackoff;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use derive_more::{Display, From};
 use futures::{stream, stream::TryStreamExt};
-use http::StatusCode;
+use http::{HeaderMap, StatusCode};
+use rusoto_core::request::BufferedHttpResponse;
 use rusoto_core::{HttpClient, Region, RusotoError};
 use rusoto_credential::{
     AutoRefreshingProvider, DefaultCredentialsProvider, ProvideAwsCredentials,
@@ -295,65 +296,105 @@ where
     ) -> Result<(), Self::Error> {
         let (_len, stream) = value.into_parts();
 
-        let mu_request = CreateMultipartUploadRequest {
-            bucket: self.bucket.clone(),
-            key: self.key_to_path(&key),
-            ..Default::default()
-        };
-        let mu_response =
-            self.client.create_multipart_upload(mu_request).await?;
+        let mu_response = retry(ExponentialBackoff::default(), || async {
+            Ok(self
+                .client
+                .create_multipart_upload(CreateMultipartUploadRequest {
+                    bucket: self.bucket.clone(),
+                    key: self.key_to_path(&key),
+                    ..Default::default()
+                })
+                .await?)
+        })
+        .await?;
+
+        // Okay to unwrap. This would only be None  there is a bug in either
+        // Rusoto or S3 itself.
         let upload_id = mu_response.upload_id.unwrap();
 
-        const CHUNK_SIZE: usize = 102_400_000;
-        const BUF_SIZE: usize = 1024;
-        let mut buffer = Vec::with_capacity(CHUNK_SIZE);
-        let mut read_buffer = [0; BUF_SIZE];
+        // 100 MB
+        const CHUNK_SIZE: usize = 100 * 1024 * 1024;
+
+        let mut buffer = BytesMut::with_capacity(CHUNK_SIZE);
         let mut part_number = 1;
         let mut completed_parts = Vec::new();
         let mut streaming_body = StreamingBody::new(stream).into_async_read();
 
         loop {
-            let size = streaming_body.read(&mut read_buffer).await?;
-            buffer.append(&mut read_buffer[..size].to_vec());
+            let size = streaming_body.read_buf(&mut buffer).await?;
 
-            if buffer.len() >= CHUNK_SIZE || size == 0 {
-                let up_request = UploadPartRequest {
-                    content_length: Some(buffer.len() as i64),
-                    body: Some(StreamingBody::from(buffer)),
+            if buffer.len() < CHUNK_SIZE && size != 0 {
+                continue;
+            }
+
+            let chunk = buffer.split().freeze();
+
+            let up_response = retry(ExponentialBackoff::default(), || async {
+                let chunk = chunk.clone();
+                let chunk_len = chunk.len();
+                let body =
+                    StreamingBody::new(Box::pin(stream::once(async move {
+                        Ok(chunk)
+                    })));
+
+                let req = UploadPartRequest {
+                    content_length: Some(chunk_len as i64),
+                    body: Some(body),
                     bucket: self.bucket.clone(),
                     key: self.key_to_path(&key),
                     part_number,
                     upload_id: upload_id.clone(),
                     ..Default::default()
                 };
-                let up_response = self.client.upload_part(up_request).await?;
+                Ok(self.client.upload_part(req).await?)
+            })
+            .await?;
 
-                completed_parts.push(CompletedPart {
-                    e_tag: up_response.e_tag.clone(),
-                    part_number: Some(part_number),
-                });
+            completed_parts.push(CompletedPart {
+                e_tag: up_response.e_tag.clone(),
+                part_number: Some(part_number),
+            });
 
-                if size == 0 {
-                    // The stream has ended.
-                    break;
-                } else {
-                    part_number = part_number + 1;
-                    let next_buffer = Vec::with_capacity(CHUNK_SIZE);
-                    buffer = next_buffer;
-                }
+            if size == 0 {
+                // The stream has ended.
+                break;
+            } else {
+                part_number += 1;
             }
         }
 
-        let cm_request = CompleteMultipartUploadRequest {
-            bucket: self.bucket.clone(),
-            key: self.key_to_path(&key),
-            multipart_upload: Some(CompletedMultipartUpload {
-                parts: Some(completed_parts),
-            }),
-            upload_id: upload_id.clone(),
-            ..Default::default()
-        };
-        self.client.complete_multipart_upload(cm_request).await?;
+        // Complete the upload.
+        retry(ExponentialBackoff::default(), || async {
+            let req = CompleteMultipartUploadRequest {
+                bucket: self.bucket.clone(),
+                key: self.key_to_path(&key),
+                multipart_upload: Some(CompletedMultipartUpload {
+                    parts: Some(completed_parts.clone()),
+                }),
+                upload_id: upload_id.clone(),
+                ..Default::default()
+            };
+
+            let output = self.client.complete_multipart_upload(req).await?;
+
+            // Workaround: https://github.com/rusoto/rusoto/issues/1936
+            // Rusoto may return `Ok` when there is a failure.
+            if output.location == None
+                && output.e_tag == None
+                && output.bucket == None
+                && output.key == None
+            {
+                return Err(RusotoError::Unknown(BufferedHttpResponse {
+                    status: StatusCode::from_u16(500).unwrap(),
+                    headers: HeaderMap::with_capacity(0),
+                    body: Bytes::from_static(b"HTTP 500 internal error"),
+                })
+                .into());
+            }
+
+            Ok(())
+        })
+        .await?;
 
         Ok(())
     }
