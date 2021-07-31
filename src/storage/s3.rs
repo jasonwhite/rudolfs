@@ -20,20 +20,25 @@
 use async_trait::async_trait;
 use backoff::future::retry;
 use backoff::ExponentialBackoff;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use derive_more::{Display, From};
 use futures::{stream, stream::TryStreamExt};
-use http::StatusCode;
+use http::{HeaderMap, StatusCode};
+use rusoto_core::request::BufferedHttpResponse;
 use rusoto_core::{HttpClient, Region, RusotoError};
 use rusoto_credential::{
     AutoRefreshingProvider, DefaultCredentialsProvider, ProvideAwsCredentials,
 };
 use rusoto_s3::{
-    GetObjectError, GetObjectRequest, HeadBucketError, HeadBucketRequest,
-    HeadObjectError, HeadObjectRequest, PutObjectError, PutObjectRequest,
-    S3Client, StreamingBody, S3,
+    CompleteMultipartUploadError, CompleteMultipartUploadRequest,
+    CompletedMultipartUpload, CompletedPart, CreateMultipartUploadError,
+    CreateMultipartUploadRequest, GetObjectError, GetObjectRequest,
+    HeadBucketError, HeadBucketRequest, HeadObjectError, HeadObjectRequest,
+    PutObjectError, PutObjectRequest, S3Client, StreamingBody, UploadPartError,
+    UploadPartRequest, S3,
 };
 use rusoto_sts::WebIdentityProvider;
+use tokio::io::AsyncReadExt;
 
 use super::{LFSObject, Storage, StorageKey, StorageStream};
 use rusoto_s3::util::{PreSignedRequest, PreSignedRequestOption};
@@ -46,7 +51,12 @@ type BoxedCredentialProvider =
 pub enum Error {
     Get(RusotoError<GetObjectError>),
     Put(RusotoError<PutObjectError>),
+    CreateMultipart(RusotoError<CreateMultipartUploadError>),
+    Upload(RusotoError<UploadPartError>),
+    CompleteMultipart(RusotoError<CompleteMultipartUploadError>),
     Head(RusotoError<HeadObjectError>),
+
+    Stream(std::io::Error),
 
     /// Initialization error.
     Init(InitError),
@@ -284,17 +294,107 @@ where
         key: StorageKey,
         value: LFSObject,
     ) -> Result<(), Self::Error> {
-        let (len, stream) = value.into_parts();
+        let (_len, stream) = value.into_parts();
 
-        let request = PutObjectRequest {
-            bucket: self.bucket.clone(),
-            key: self.key_to_path(&key),
-            content_length: Some(len as i64),
-            body: Some(StreamingBody::new(stream)),
-            ..Default::default()
-        };
+        let mu_response = retry(ExponentialBackoff::default(), || async {
+            Ok(self
+                .client
+                .create_multipart_upload(CreateMultipartUploadRequest {
+                    bucket: self.bucket.clone(),
+                    key: self.key_to_path(&key),
+                    ..Default::default()
+                })
+                .await?)
+        })
+        .await?;
 
-        self.client.put_object(request).await?;
+        // Okay to unwrap. This would only be None  there is a bug in either
+        // Rusoto or S3 itself.
+        let upload_id = mu_response.upload_id.unwrap();
+
+        // 100 MB
+        const CHUNK_SIZE: usize = 100 * 1024 * 1024;
+
+        let mut buffer = BytesMut::with_capacity(CHUNK_SIZE);
+        let mut part_number = 1;
+        let mut completed_parts = Vec::new();
+        let mut streaming_body = StreamingBody::new(stream).into_async_read();
+
+        loop {
+            let size = streaming_body.read_buf(&mut buffer).await?;
+
+            if buffer.len() < CHUNK_SIZE && size != 0 {
+                continue;
+            }
+
+            let chunk = buffer.split().freeze();
+
+            let up_response = retry(ExponentialBackoff::default(), || async {
+                let chunk = chunk.clone();
+                let chunk_len = chunk.len();
+                let body =
+                    StreamingBody::new(Box::pin(stream::once(async move {
+                        Ok(chunk)
+                    })));
+
+                let req = UploadPartRequest {
+                    content_length: Some(chunk_len as i64),
+                    body: Some(body),
+                    bucket: self.bucket.clone(),
+                    key: self.key_to_path(&key),
+                    part_number,
+                    upload_id: upload_id.clone(),
+                    ..Default::default()
+                };
+                Ok(self.client.upload_part(req).await?)
+            })
+            .await?;
+
+            completed_parts.push(CompletedPart {
+                e_tag: up_response.e_tag.clone(),
+                part_number: Some(part_number),
+            });
+
+            if size == 0 {
+                // The stream has ended.
+                break;
+            } else {
+                part_number += 1;
+            }
+        }
+
+        // Complete the upload.
+        retry(ExponentialBackoff::default(), || async {
+            let req = CompleteMultipartUploadRequest {
+                bucket: self.bucket.clone(),
+                key: self.key_to_path(&key),
+                multipart_upload: Some(CompletedMultipartUpload {
+                    parts: Some(completed_parts.clone()),
+                }),
+                upload_id: upload_id.clone(),
+                ..Default::default()
+            };
+
+            let output = self.client.complete_multipart_upload(req).await?;
+
+            // Workaround: https://github.com/rusoto/rusoto/issues/1936
+            // Rusoto may return `Ok` when there is a failure.
+            if output.location == None
+                && output.e_tag == None
+                && output.bucket == None
+                && output.key == None
+            {
+                return Err(RusotoError::Unknown(BufferedHttpResponse {
+                    status: StatusCode::from_u16(500).unwrap(),
+                    headers: HeaderMap::with_capacity(0),
+                    body: Bytes::from_static(b"HTTP 500 internal error"),
+                })
+                .into());
+            }
+
+            Ok(())
+        })
+        .await?;
 
         Ok(())
     }
