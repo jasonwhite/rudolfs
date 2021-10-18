@@ -68,14 +68,14 @@ where
 
     async fn size(&self, key: &StorageKey) -> Result<Option<u64>, Self::Error> {
         retry(ExponentialBackoff::default(), || async {
-            Ok(self.storage.size(&key).await?)
+            Ok(self.storage.size(key).await?)
         })
         .await
     }
 
     async fn delete(&self, key: &StorageKey) -> Result<(), Self::Error> {
         retry(ExponentialBackoff::default(), || async {
-            Ok(self.storage.delete(&key).await?)
+            Ok(self.storage.delete(key).await?)
         })
         .await
     }

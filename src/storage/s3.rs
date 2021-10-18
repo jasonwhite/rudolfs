@@ -435,11 +435,9 @@ where
     }
 
     fn public_url(&self, key: &StorageKey) -> Option<String> {
-        if let Some(cdn) = self.cdn.as_ref() {
-            Some(format!("{}/{}", cdn, self.key_to_path(key)))
-        } else {
-            None
-        }
+        self.cdn
+            .as_ref()
+            .map(|cdn| format!("{}/{}", cdn, self.key_to_path(key)))
     }
 
     async fn upload_url(
@@ -449,13 +447,11 @@ where
     ) -> Option<String> {
         // Don't use a presigned URL if we're not using a CDN. Otherwise,
         // uploads will bypass the encryption process and fail to download.
-        if self.cdn.is_none() {
-            return None;
-        }
+        self.cdn.as_ref()?;
 
         let request = PutObjectRequest {
             bucket: self.bucket.clone(),
-            key: self.key_to_path(&key),
+            key: self.key_to_path(key),
             ..Default::default()
         };
         let credentials = self.credential_provider.credentials().await.ok()?;

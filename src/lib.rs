@@ -17,6 +17,8 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+#![deny(clippy::all)]
+
 mod app;
 mod error;
 mod hyperext;
@@ -144,7 +146,7 @@ impl S3ServerBuilder {
                  through Rudolfs in this case, they will *not* be encrypted."
             );
 
-            if let Some(_) = self.cache.take() {
+            if self.cache.take().is_some() {
                 log::warn!(
                     "A local disk cache does not work with a CDN and will be \
                      disabled."
@@ -276,5 +278,5 @@ where
         future::ok::<_, Infallible>(Logger::new(socket.remote_addr(), service))
     });
 
-    hyper::Server::bind(&addr).serve(new_service)
+    hyper::Server::bind(addr).serve(new_service)
 }

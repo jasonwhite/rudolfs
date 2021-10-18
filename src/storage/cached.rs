@@ -226,7 +226,7 @@ where
         // Prometheus.
         if self.lru.lock().await.get_refresh(key).is_some() {
             // Cache hit! (Probably)
-            let obj = self.cache.get(&key).await.map_err(Error::from_cache)?;
+            let obj = self.cache.get(key).await.map_err(Error::from_cache)?;
 
             return match obj {
                 Some(obj) => Ok(Some(obj)),
@@ -235,12 +235,12 @@ where
                     // from our LRU. This can happen if the cache is cleared out
                     // manually.
                     let mut lru = self.lru.lock().await;
-                    lru.remove(&key);
+                    lru.remove(key);
 
                     // Fall back to permanent storage. Note that this won't
                     // actually cache the object. This will be done next time
                     // the same object is requested.
-                    self.storage.get(&key).await.map_err(Error::from_storage)
+                    self.storage.get(key).await.map_err(Error::from_storage)
                 }
             };
         }
