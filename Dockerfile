@@ -1,4 +1,4 @@
-FROM rust:1.49 as build
+FROM rust:1.55 as build
 
 ENV CARGO_BUILD_TARGET=x86_64-unknown-linux-musl
 
