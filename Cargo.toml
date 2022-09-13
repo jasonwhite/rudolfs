@@ -47,7 +47,7 @@ uuid = { version = "1.1", features = ["v4"] }
 rand = "0.8"
 tempfile = "3"
 duct = "0.13"
-env_logger = "0.8"
+env_logger = "0.9"
 toml = "0.5"
 
 [dependencies.rusoto_core]
