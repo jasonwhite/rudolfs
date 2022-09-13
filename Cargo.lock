@@ -582,12 +582,6 @@ dependencies = [
 
 [[package]]
 name = "hex"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "805026a5d0141ffc30abb3be3173848ad46a1b1664fe632428479619a3644d77"
-
-[[package]]
-name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
@@ -1155,7 +1149,7 @@ dependencies = [
  "env_logger 0.9.0",
  "futures",
  "generic-array",
- "hex 0.3.2",
+ "hex",
  "http",
  "human-size",
  "humansize",
@@ -1248,7 +1242,7 @@ dependencies = [
  "chrono",
  "digest 0.9.0",
  "futures",
- "hex 0.4.3",
+ "hex",
  "hmac",
  "http",
  "hyper",

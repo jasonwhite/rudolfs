@@ -28,7 +28,7 @@ use futures::{ready, Stream};
 use hex::{FromHex, FromHexError, ToHex};
 use serde::{
     de::{self, Deserializer, Visitor},
-    ser::{self, Serializer},
+    ser::Serializer,
     Deserialize, Serialize,
 };
 
@@ -119,15 +119,9 @@ impl FromStr for Sha256 {
     }
 }
 
-impl fmt::UpperHex for Sha256 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.write_hex_upper(f)
-    }
-}
-
 impl fmt::LowerHex for Sha256 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.write_hex(f)
+        f.write_str(hex::encode(self).as_str())
     }
 }
 
@@ -159,13 +153,8 @@ impl Serialize for Sha256 {
         S: Serializer,
     {
         if serializer.is_human_readable() {
-            // Serialize as a hex string.
-            let mut hex = String::new();
-            self.0
-                .as_slice()
-                .write_hex(&mut hex)
-                .map_err(ser::Error::custom)?;
-            serializer.serialize_str(&hex)
+            let hex: String = self.encode_hex();
+            serializer.serialize_str(hex.as_str())
         } else {
             // Serialize as a byte array with known length.
             serializer.serialize_bytes(self.0.as_ref())
