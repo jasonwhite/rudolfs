@@ -84,7 +84,7 @@ pub enum InitError {
 }
 
 impl InitError {
-    /// Converts the initialization error into an backoff error. Useful for not
+    /// Converts the initialization error into a backoff error. Useful for not
     /// retrying certain errors.
     pub fn into_backoff(self) -> backoff::Error<InitError> {
         // Certain types of errors should never be retried.
@@ -92,7 +92,11 @@ impl InitError {
             InitError::Bucket | InitError::Credentials => {
                 backoff::Error::Permanent(self)
             }
-            _ => backoff::Error::Transient(self),
+            _ => backoff::Error::Transient {
+                err: self,
+                retry_after: None, /* NOTE: None causes us to follow retry
+                                    * policy here */
+            },
         }
     }
 }
