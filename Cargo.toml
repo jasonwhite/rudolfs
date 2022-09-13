@@ -41,7 +41,7 @@ structopt = "0.3"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.6", features = ["full"] }
 url = "2"
-uuid = { version = "0.8", features = ["v4"] }
+uuid = { version = "1.1", features = ["v4"] }
 
 [dev-dependencies]
 rand = "0.8"
