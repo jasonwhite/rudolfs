@@ -29,7 +29,6 @@ use futures::{
     future::{self, FutureExt, TryFutureExt},
     stream::{StreamExt, TryStreamExt},
 };
-use humansize::{file_size_opts as file_size, FileSize};
 use tokio::{self, sync::Mutex};
 
 use crate::lru;
@@ -109,9 +108,7 @@ where
         log::info!(
             "Prepopulated cache with {} entries ({})",
             lru.len(),
-            lru.size()
-                .file_size(file_size::DECIMAL)
-                .unwrap_or_else(|e| e)
+            humansize::format_size(lru.size(), humansize::DECIMAL),
         );
 
         let lru = Arc::new(Mutex::new(lru));
