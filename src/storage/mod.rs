@@ -58,9 +58,8 @@ pub type S3DiskCache = Cached<Disk, S3>;
 pub type StorageStream<T, E> = BoxStream<'static, Result<T, E>>;
 
 /// The byte stream of an LFS object.
-pub type ByteStream = Pin<
-    Box<dyn Stream<Item = Result<Bytes, io::Error>> + Send + Sync + 'static>,
->;
+pub type ByteStream =
+    Pin<Box<dyn Stream<Item = Result<Bytes, io::Error>> + Send + 'static>>;
 
 /// A namespace is used to categorize stored LFS objects. The storage
 /// implementation is free to ignore this. However, it can be useful when
