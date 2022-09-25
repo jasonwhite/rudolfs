@@ -9,8 +9,8 @@ services:
       - miniodata:/data
     environment:
       # force using given key-secret instead of creating at start
-      - MINIO_ACCESS_KEY=${AWS_ACCESS_KEY_ID}
-      - MINIO_SECRET_KEY=${AWS_SECRET_ACCESS_KEY}
+      - MINIO_ROOT_USER=${AWS_ACCESS_KEY_ID}
+      - MINIO_ROOT_PASSWORD=${AWS_SECRET_ACCESS_KEY}
     command: ["server", "/data"]
   app:
     image: jasonwhite0/rudolfs:latest
@@ -23,6 +23,7 @@ services:
       - data:/data
     restart: always
     environment:
+      - AWS_REGION
       - AWS_ACCESS_KEY_ID
       - AWS_SECRET_ACCESS_KEY
       - AWS_DEFAULT_REGION
