@@ -2,7 +2,7 @@
 name = "rudolfs"
 version = "0.3.6"
 authors = ["Jason White <rust@jasonwhite.io>"]
-edition = "2018"
+edition = "2021"
 description = """
 A high-performance, caching Git LFS server with an AWS S3 back-end.
 """
