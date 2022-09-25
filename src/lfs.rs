@@ -116,7 +116,7 @@ pub struct ResponseObject {
     pub error: Option<ObjectError>,
 
     /// Optional boolean specifying whether the request for this specific
-    /// object is authenticated. If ommitted or `false`, Git LFS will
+    /// object is authenticated. If omitted or `false`, Git LFS will
     /// attempt to find credentials for this URL.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authenticated: Option<bool>,
@@ -145,7 +145,7 @@ pub struct BatchRequest {
     ///
     /// Note: Git LFS currently only supports the `basic` transfer adapter.
     /// This property was added for future compatibility with some experimental
-    /// tranfer adapters.
+    /// transfer adapters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transfers: Option<Vec<Transfer>>,
 
@@ -164,7 +164,7 @@ pub struct BatchRequest {
 pub struct BatchResponse {
     /// String identifier of the transfer adapter that the server prefers. This
     /// *must* be one of the given `transfer` identifiers from the request.
-    /// Servers can assume the `basic` transfer adaptor if `None` was given.
+    /// Servers can assume the `basic` transfer adapter if `None` was given.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transfer: Option<Transfer>,
 
