@@ -18,10 +18,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 use std::io;
+use std::time::Duration;
 
+use crate::storage::ByteStream;
 use async_trait::async_trait;
 use derive_more::{Display, From};
-use futures::{try_ready, Async, Future, Poll, Stream};
+use futures::StreamExt;
 use rand::{self, Rng};
 
 use super::{LFSObject, Storage, StorageKey, StorageStream};
@@ -50,6 +52,16 @@ impl<S> Backend<S> {
     }
 }
 
+fn faulty_stream(stream: ByteStream) -> ByteStream {
+    Box::pin(stream.map(|item| {
+        if rand::thread_rng().gen::<u8>() == 0 {
+            Err(io::Error::new(io::ErrorKind::Other, "injected fault"))
+        } else {
+            item
+        }
+    }))
+}
+
 #[async_trait]
 impl<S> Storage for Backend<S>
 where
@@ -62,11 +74,16 @@ where
         &self,
         key: &StorageKey,
     ) -> Result<Option<LFSObject>, Self::Error> {
-        Box::pin(self.storage.get(key).map(move |obj| -> Option<_> {
-            let (len, stream) = obj?.into_parts();
-
-            Some(LFSObject::new(len, Box::pin(FaultyStream::new(stream))))
-        }))
+        let obj = self.storage.get(key).await;
+        match obj {
+            Ok(Some(lfs_obj)) => {
+                let (len, s) = lfs_obj.into_parts();
+                let fs = faulty_stream(s);
+                Ok(Some(LFSObject::new(len, Box::pin(fs))))
+            }
+            Ok(None) => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     async fn put(
@@ -76,17 +93,17 @@ where
     ) -> Result<(), Self::Error> {
         let (len, stream) = value.into_parts();
 
-        let stream = FaultyStream::new(stream);
-
-        self.storage.put(key, LFSObject::new(len, Box::pin(stream)))
+        self.storage
+            .put(key, LFSObject::new(len, faulty_stream(stream)))
+            .await
     }
 
     async fn size(&self, key: &StorageKey) -> Result<Option<u64>, Self::Error> {
-        self.storage.size(key)
+        self.storage.size(key).await
     }
 
     async fn delete(&self, key: &StorageKey) -> Result<(), Self::Error> {
-        self.storage.delete(key)
+        self.storage.delete(key).await
     }
 
     fn list(&self) -> StorageStream<(StorageKey, u64), Self::Error> {
@@ -100,6 +117,18 @@ where
     async fn max_size(&self) -> Option<u64> {
         self.storage.max_size().await
     }
+
+    fn public_url(&self, key: &StorageKey) -> Option<String> {
+        self.storage.public_url(key)
+    }
+
+    async fn upload_url(
+        &self,
+        key: &StorageKey,
+        expires_in: Duration,
+    ) -> Option<String> {
+        self.storage.upload_url(key, expires_in).await
+    }
 }
 
 #[derive(Debug, Display)]
@@ -111,46 +140,5 @@ impl std::error::Error for FaultError {}
 impl From<FaultError> for io::Error {
     fn from(error: FaultError) -> io::Error {
         io::Error::new(io::ErrorKind::Other, error.to_string())
-    }
-}
-
-/// A stream that has random failures.
-///
-/// One out of 256 items of the stream will fail.
-pub struct FaultyStream<S> {
-    /// The underlying stream.
-    stream: S,
-}
-
-impl<S> FaultyStream<S> {
-    pub fn new(stream: S) -> Self {
-        FaultyStream { stream }
-    }
-}
-
-impl<S> Stream for FaultyStream<S>
-where
-    S: Stream,
-    S::Error: From<FaultError>,
-{
-    type Item = S::Item;
-    type Error = S::Error;
-
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        let item = try_ready!(self.stream.poll());
-
-        match item {
-            Some(item) => {
-                if rand::thread_rng().gen::<u8>() == 0 {
-                    Err(FaultError.into())
-                } else {
-                    Ok(Async::Ready(Some(item)))
-                }
-            }
-            None => {
-                // End of stream.
-                Ok(Async::Ready(None))
-            }
-        }
     }
 }

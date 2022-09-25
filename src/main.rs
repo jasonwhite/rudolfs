@@ -25,8 +25,11 @@ use structopt::StructOpt;
 
 use rudolfs::{Cache, LocalServerBuilder, S3ServerBuilder};
 
-#[cfg(feature = "faulty")]
-use crate::storage::Faulty;
+mod lfs;
+mod lru;
+mod sha256;
+mod storage;
+mod util;
 
 // Additional help to append to the end when `--help` is specified.
 static AFTER_HELP: &str = include_str!("help.md");
