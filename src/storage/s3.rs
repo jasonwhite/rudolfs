@@ -379,10 +379,10 @@ where
 
             // Workaround: https://github.com/rusoto/rusoto/issues/1936
             // Rusoto may return `Ok` when there is a failure.
-            if output.location == None
-                && output.e_tag == None
-                && output.bucket == None
-                && output.key == None
+            if output.location.is_none()
+                && output.e_tag.is_none()
+                && output.bucket.is_none()
+                && output.key.is_none()
             {
                 return Err(RusotoError::Unknown(BufferedHttpResponse {
                     status: StatusCode::from_u16(500).unwrap(),
