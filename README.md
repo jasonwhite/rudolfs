@@ -89,7 +89,15 @@ cargo run -- \
 **Note**: Always use a different S3 bucket, cache directory, and encryption key
 than what you use in your production environment.
 
-**Note**: *This server may not be accessible from other machines.* Specifying `--host localhost:8080` will often bind the server to an internal-only network interface (i.e., if `localhost` resolves to `127.0.0.1` or `[::1]`). Thus, to make the server accessible from the outside world, specify `--host 0.0.0.0:8080` or just `--port 8080` (the default IP the server will bind to is `0.0.0.0`). See https://github.com/jasonwhite/rudolfs/issues/38#issuecomment-973721511 for more information.
+**Warning**: *This server may not be accessible from other machines.* Specifying
+`--host localhost:8080` will often bind the server to an internal-only loopback
+network interface (i.e., if `localhost` resolves to `127.0.0.1` or `[::1]`).
+Thus, to make the server accessible from the outside world, specify `--host
+0.0.0.0:8080` or just `--port 8080` (the default IP the server will bind to is
+`0.0.0.0`). IP `0.0.0.0` means the server shall try to bind to all available
+network interfaces, both internal and external. See
+https://github.com/jasonwhite/rudolfs/issues/38#issuecomment-973721511 for more
+information.
 
 ### Production
 
