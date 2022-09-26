@@ -151,11 +151,18 @@ variable. If that is malformed or absent it will fall back to `us-east-1`.
 
 ## Client Configuration
 
-Add `.lfsconfig` to the root of your Git repository:
+Add a file named `.lfsconfig` to the root of your Git repository and commit it
+so everyone is using the same LFS server:
 
 ```
 [lfs]
 url = "http://gitlfs.example.com:8080/api/my-org/my-project"
+              ─────────┬──────── ──┬─ ─┬─ ───┬── ─────┬────
+                       │           │   │     │        └ Replace with your project's name
+                       │           │   │     └ Replace with your organization name   
+                       │           │   └ Required to be "api"
+                       │           └ The port your server started with
+                       └ The host name of your server
 ```
 
 Optionally, I also recommend changing these global settings to speed things up:
