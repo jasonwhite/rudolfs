@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.6
+
+- Bump versions of various dependencies.
+
 ## v0.3.5
 
  - Support the `X-Forwarded-Host` header to work better with load balancers.
