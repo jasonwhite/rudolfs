@@ -2,7 +2,10 @@
 
 ## v0.3.6
 
-- Bump versions of various dependencies.
+- Bumped versions of various dependencies.
+- Fixed Minio environment variables in `docker-compose.minio.yml`
+  * `MINIO_ACCESS_KEY` was renamed to `MINIO_ROOT_USER`
+  * `MINIO_SECRET_KEY` was renamed to `MINIO_ROOT_PASSWORD`
 
 ## v0.3.5
 
