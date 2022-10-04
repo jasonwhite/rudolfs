@@ -1,5 +1,14 @@
 # Changelog
 
+# v0.4.0
+
+- Rely on docker / docker-compose to package `tini` (or compatible init system).
+  All modern versions of the docker daemon support `--init`. Note that if you
+  were using any previous version of rudolfs you now need to ensure
+  that `--init` is added to your `docker run` arguments. If you are launching
+  rudolfs via the `docker-compose` configs supplied with rudolfs then `--init`
+  is enabled by default.
+
 ## v0.3.6
 
 - Bump versions of various dependencies.
