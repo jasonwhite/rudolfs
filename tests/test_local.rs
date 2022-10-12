@@ -59,12 +59,26 @@ async fn local_smoke_test() -> Result<(), Box<dyn std::error::Error>> {
     // Make sure we can push LFS objects to the server.
     repo.lfs_push()?;
 
-    // Make sure we can re-download the same objects.
-    repo.clean_lfs()?;
-    repo.lfs_pull()?;
-
     // Push again. This should be super fast.
     repo.lfs_push()?;
+
+    // This should be fast since we already have the data
+    repo.lfs_pull()?;
+
+    // Make sure we can re-download the same objects in another repo
+    let repo_clone = repo.clone_repo().expect("unable to clone");
+
+    // This should be fast since the lfs data should come along properly with
+    // the clone
+    repo_clone.lfs_pull()?;
+
+    // Add some more files and make sure you can pull those into the clone
+    repo.add_random(Path::new("4mb_2.bin"), 4 * 1024 * 1024, &mut rng)?;
+    repo.add_random(Path::new("8mb_2.bin"), 8 * 1024 * 1024, &mut rng)?;
+    repo.add_random(Path::new("16mb_2.bin"), 16 * 1024 * 1024, &mut rng)?;
+    repo.commit("Add LFS objects 2")?;
+
+    repo_clone.pull()?;
 
     shutdown_tx.send(()).expect("server died too soon");
 

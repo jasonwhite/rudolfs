@@ -65,6 +65,21 @@ impl GitRepo {
         Ok(Self { repo })
     }
 
+    pub fn clone_repo(&self) -> io::Result<Self> {
+        let repo = tempfile::TempDir::new()?;
+        let src_dir_str = self
+            .repo
+            .path()
+            .to_str()
+            .expect("could not convert src repo path to str");
+        let dst_dir_str = repo
+            .path()
+            .to_str()
+            .expect("could not convert src repo path to str");
+        cmd!("git", "clone", src_dir_str, dst_dir_str).run()?;
+        Ok(Self { repo })
+    }
+
     /// Adds a random file with the given size and random number generator. The
     /// file is also staged with `git add`.
     pub fn add_random<R: Rng>(
@@ -96,6 +111,11 @@ impl GitRepo {
 
     pub fn lfs_pull(&self) -> io::Result<()> {
         cmd!("git", "lfs", "pull").dir(self.repo.path()).run()?;
+        Ok(())
+    }
+
+    pub fn pull(&self) -> io::Result<()> {
+        cmd!("git", "pull").dir(self.repo.path()).run()?;
         Ok(())
     }
 
