@@ -19,6 +19,7 @@
 // SOFTWARE.
 use std::fmt;
 use std::io;
+use std::collections::BTreeMap;
 
 use core::task::{Context, Poll};
 
@@ -27,6 +28,7 @@ use futures::{
     future::{self, BoxFuture},
     stream::TryStreamExt,
 };
+use http::HeaderMap;
 use http::{self, header, StatusCode, Uri};
 use hyper::{self, body::Body, service::Service, Method, Request, Response};
 use serde::{Deserialize, Serialize};
@@ -248,6 +250,7 @@ where
     ) -> Result<Response<Body>, Error> {
         // Get the host name and scheme.
         let uri = req.base_uri().path_and_query("/").build().unwrap();
+        let headers = req.headers().clone();
 
         match from_json::<lfs::BatchRequest>(req.into_body()).await {
             Ok(val) => {
@@ -257,6 +260,7 @@ where
                 // backend.
                 let objects = val.objects.into_iter().map(|object| {
                     let uri = uri.clone();
+                    let headers = headers.clone();
                     let key = StorageKey::new(namespace.clone(), object.oid);
 
                     async {
@@ -264,7 +268,8 @@ where
 
                         let (namespace, _) = key.into_parts();
                         Ok(basic_response(
-                            uri, &storage, object, operation, size, namespace,
+                            uri, headers, &storage, object, operation, size,
+                            namespace,
                         )
                         .await)
                     }
@@ -298,6 +303,7 @@ where
 
 async fn basic_response<E, S>(
     uri: Uri,
+    headers: HeaderMap,
     storage: &S,
     object: lfs::RequestObject,
     op: lfs::Operation,
@@ -389,7 +395,7 @@ where
                                         uri, namespace, object.oid
                                     )
                                 }),
-                            header: None,
+                            header: extract_auth_header(headers.clone()),
                             expires_in: Some(upload_expiry_secs),
                             expires_at: None,
                         }),
@@ -398,7 +404,7 @@ where
                                 "{}api/{}/objects/verify",
                                 uri, namespace
                             ),
-                            header: None,
+                            header: extract_auth_header(headers),
                             expires_in: None,
                             expires_at: None,
                         }),
@@ -428,7 +434,7 @@ where
                                         uri, namespace, object.oid
                                     )
                                 }),
-                            header: None,
+                            header: extract_auth_header(headers),
                             expires_in: None,
                             expires_at: None,
                         }),
@@ -448,6 +454,23 @@ where
                 },
             }
         }
+    }
+}
+
+fn extract_auth_header(headers: HeaderMap) -> Option<BTreeMap<String, String>> {
+    let headers = headers.iter().filter_map(|(k, v)| {
+        if k == http::header::AUTHORIZATION {
+            let value = String::from_utf8_lossy(v.as_bytes()).to_string();
+            Some((k.to_string(), value))
+        } else {
+            None
+        }
+    });
+    let map = BTreeMap::from_iter(headers);
+    if map.is_empty() {
+        None
+    } else {
+        Some(map)
     }
 }
 
