@@ -17,9 +17,9 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+use std::collections::BTreeMap;
 use std::fmt;
 use std::io;
-use std::collections::BTreeMap;
 
 use core::task::{Context, Poll};
 
@@ -395,7 +395,7 @@ where
                                         uri, namespace, object.oid
                                     )
                                 }),
-                            header: extract_auth_header(headers.clone()),
+                            header: extract_auth_header(&headers),
                             expires_in: Some(upload_expiry_secs),
                             expires_at: None,
                         }),
@@ -404,7 +404,7 @@ where
                                 "{}api/{}/objects/verify",
                                 uri, namespace
                             ),
-                            header: extract_auth_header(headers),
+                            header: extract_auth_header(&headers),
                             expires_in: None,
                             expires_at: None,
                         }),
@@ -434,7 +434,7 @@ where
                                         uri, namespace, object.oid
                                     )
                                 }),
-                            header: extract_auth_header(headers),
+                            header: extract_auth_header(&headers),
                             expires_in: None,
                             expires_at: None,
                         }),
@@ -457,7 +457,15 @@ where
     }
 }
 
-fn extract_auth_header(headers: HeaderMap) -> Option<BTreeMap<String, String>> {
+/// Extracts the authorization headers so that they can be reflected back to the
+/// `git-lfs` client.  If we're behind a reverse proxy that provides
+/// authentication, the `git-lfs` client will send an `Authorization` header on
+/// the first connection, however in order for subsequent requests to also be
+/// authenticated, the `header` field in the `lfs::ResponseObject` must be
+/// populated.
+fn extract_auth_header(
+    headers: &HeaderMap,
+) -> Option<BTreeMap<String, String>> {
     let headers = headers.iter().filter_map(|(k, v)| {
         if k == http::header::AUTHORIZATION {
             let value = String::from_utf8_lossy(v.as_bytes()).to_string();
