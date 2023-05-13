@@ -260,7 +260,6 @@ where
                 // backend.
                 let objects = val.objects.into_iter().map(|object| {
                     let uri = uri.clone();
-                    let headers = headers.clone();
                     let key = StorageKey::new(namespace.clone(), object.oid);
 
                     async {
@@ -268,7 +267,7 @@ where
 
                         let (namespace, _) = key.into_parts();
                         Ok(basic_response(
-                            uri, headers, &storage, object, operation, size,
+                            uri, &headers, &storage, object, operation, size,
                             namespace,
                         )
                         .await)
@@ -303,7 +302,7 @@ where
 
 async fn basic_response<E, S>(
     uri: Uri,
-    headers: HeaderMap,
+    headers: &HeaderMap,
     storage: &S,
     object: lfs::RequestObject,
     op: lfs::Operation,
