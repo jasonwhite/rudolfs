@@ -394,7 +394,7 @@ where
                                         uri, namespace, object.oid
                                     )
                                 }),
-                            header: extract_auth_header(&headers),
+                            header: extract_auth_header(headers),
                             expires_in: Some(upload_expiry_secs),
                             expires_at: None,
                         }),
@@ -403,7 +403,7 @@ where
                                 "{}api/{}/objects/verify",
                                 uri, namespace
                             ),
-                            header: extract_auth_header(&headers),
+                            header: extract_auth_header(headers),
                             expires_in: None,
                             expires_at: None,
                         }),
@@ -433,7 +433,7 @@ where
                                         uri, namespace, object.oid
                                     )
                                 }),
-                            header: extract_auth_header(&headers),
+                            header: extract_auth_header(headers),
                             expires_in: None,
                             expires_at: None,
                         }),
