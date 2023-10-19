@@ -1,0 +1,48 @@
+# Copy this file to another location and modify as necessary.
+version: '3'
+services:
+  app:
+    image: jasonwhite0/rudolfs:latest
+    #build:
+    #  context: .
+    #  dockerfile: Dockerfile
+    ports:
+      - "8081:8080"
+    volumes:
+      - data:/data
+    restart: always
+    environment:
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_DEFAULT_REGION
+      - LFS_ENCRYPTION_KEY
+      - LFS_S3_BUCKET
+      - LFS_MAX_CACHE_SIZE
+    entrypoint:
+      - /tini
+      - --
+      - /rudolfs
+      - --cache-dir
+      - /data
+      - --key
+      - ${LFS_ENCRYPTION_KEY}
+      - --port
+      - "8080"
+      - local
+      - --path=/data
+
+  # A real production server should use nginx. How to configure this depends on
+  # your needs. Use your Google-search skills to configure this correctly.
+  #
+  # nginx:
+  #   image: nginx:stable
+  #   ports:
+  #     - 80:80
+  #     - 443:443
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf
+  #     - ./nginx/errors.log:/etc/nginx/errors.log
+
+
+volumes:
+  data:
