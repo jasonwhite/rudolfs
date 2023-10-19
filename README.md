@@ -92,7 +92,6 @@ If you just need to use the local disk as the backend, use the following bash.
 # Change this to the output of `openssl rand -hex 32`.
 export RUDOLFS_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
-
 cargo run -- --port 8080 local --path=/data
 ```
 
@@ -150,7 +149,7 @@ To run in a production environment, it is easiest to use `docker-compose`:
 ## AWS Credentials
 
 AWS credentials must be provided to the server so that it can make requests to
-the S3 bucket specified on the command line (with `--s3-bucket`).
+the S3 bucket specified on the command line (with `--bucket`).
 
 Your AWS credentials will be searched for in the following order:
 
