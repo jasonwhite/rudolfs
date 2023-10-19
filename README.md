@@ -86,6 +86,16 @@ cargo run -- \
   --bucket foobar
 ```
 
+If you just need to use the local disk as the backend, use the following bash.
+
+```bash
+# Change this to the output of `openssl rand -hex 32`.
+export RUDOLFS_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+
+cargo run -- --port 8080 local --path=/data
+```
+
 **Note**: Always use a different S3 bucket, cache directory, and encryption key
 than what you use in your production environment.
 
@@ -119,6 +129,12 @@ To run in a production environment, it is easiest to use `docker-compose`:
 
     ```bash
     docker-compose up -d
+
+    # use minio yml
+    docker-compose -f ./docker-compose.minio.yml up -d
+    
+    # use local disk yml
+    docker-compose -f ./docker-compose.local.yml up -d
     ```
 
  3. **[Optional]**: It is best to use nginx as a reverse proxy for this server.
