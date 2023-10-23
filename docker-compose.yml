@@ -11,6 +11,7 @@ services:
     volumes:
       - data:/data
     restart: always
+    init: true
     environment:
       - AWS_ACCESS_KEY_ID
       - AWS_SECRET_ACCESS_KEY
@@ -19,8 +20,6 @@ services:
       - LFS_S3_BUCKET
       - LFS_MAX_CACHE_SIZE
     entrypoint:
-      - /tini
-      - --
       - /rudolfs
       - --cache-dir
       - /data
