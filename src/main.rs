@@ -67,7 +67,7 @@ struct GlobalArgs {
         parse(try_from_str = FromHex::from_hex),
         env = "RUDOLFS_KEY"
     )]
-    key: [u8; 32],
+    key: Option<[u8; 32]>,
 
     /// Root directory of the object cache. If not specified or if the local
     /// disk is the storage backend, then no local disk cache will be used.
@@ -156,8 +156,12 @@ impl S3Args {
         addr: SocketAddr,
         global_args: GlobalArgs,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut builder = S3ServerBuilder::new(self.bucket, global_args.key);
+        let mut builder = S3ServerBuilder::new(self.bucket);
         builder.prefix(self.prefix);
+
+        if let Some(key) = global_args.key {
+            builder.key(key);
+        }
 
         if let Some(cdn) = self.cdn {
             builder.cdn(cdn);
@@ -181,7 +185,11 @@ impl LocalArgs {
         addr: SocketAddr,
         global_args: GlobalArgs,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut builder = LocalServerBuilder::new(self.path, global_args.key);
+        let mut builder = LocalServerBuilder::new(self.path);
+
+        if let Some(key) = global_args.key {
+            builder.key(key);
+        }
 
         if let Some(cache_dir) = global_args.cache_dir {
             let max_cache_size = global_args

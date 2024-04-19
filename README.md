@@ -43,22 +43,25 @@ know by submitting an issue.
 
 ## Running It
 
-### Generate an encryption key
+### Generate an encryption key (optional)
 
-All LFS objects are encrypted with the xchacha20 symmetric stream cipher. You
-must generate a 32-byte encryption key before starting the server.
+If configured, all LFS objects are encrypted with the xchacha20 symmetric stream
+cipher. You must generate a 32-byte encryption key before starting the server.
 
 Generating a random key is easy:
 
     openssl rand -hex 32
 
 Keep this secret and save it in a password manager so you don't lose it. We will
-pass this to the server below.
+pass this to the server below via the `--key` option. If the `--key` option is
+**not** specified, then the LFS objects are **not** encrypted.
 
 **Note**:
- - If the key ever changes, all existing LFS objects will become garbage.
-   When the Git LFS client attempts to download them, the SHA256 verification
-   step will fail.
+ - If the key ever changes (or if encryption is disabled), all existing LFS
+   objects will become garbage. When the Git LFS client attempts to download
+   them, the SHA256 verification step will fail.
+ - Likewise, if encryption is later enabled after it has been disabled, all
+   existing unencrypted LFS objects will be seen as garbage.
  - LFS objects in both the cache and in permanent storage are encrypted.
    However, objects are decrypted before being sent to the LFS client, so take
    any necessary precautions to keep your intellectual property safe.

@@ -82,19 +82,19 @@ impl Cache {
 #[derive(Debug)]
 pub struct S3ServerBuilder {
     bucket: String,
-    key: [u8; 32],
+    key: Option<[u8; 32]>,
     prefix: Option<String>,
     cdn: Option<String>,
     cache: Option<Cache>,
 }
 
 impl S3ServerBuilder {
-    pub fn new(bucket: String, key: [u8; 32]) -> Self {
+    pub fn new(bucket: String) -> Self {
         Self {
             bucket,
             prefix: None,
             cdn: None,
-            key,
+            key: None,
             cache: None,
         }
     }
@@ -107,7 +107,7 @@ impl S3ServerBuilder {
 
     /// Sets the encryption key to use.
     pub fn key(&mut self, key: [u8; 32]) -> &mut Self {
-        self.key = key;
+        self.key = Some(key);
         self
     }
 
@@ -174,13 +174,28 @@ impl S3ServerBuilder {
                 let disk = Faulty::new(disk);
 
                 let cache = Cached::new(cache.max_size, disk, s3).await?;
-                let storage = Verify::new(Encrypted::new(self.key, cache));
-                Ok(Box::new(spawn_server(storage, &addr)))
+
+                match self.key {
+                    Some(key) => {
+                        let storage = Verify::new(Encrypted::new(key, cache));
+                        Ok(Box::new(spawn_server(storage, &addr)))
+                    }
+                    None => {
+                        let storage = Verify::new(cache);
+                        Ok(Box::new(spawn_server(storage, &addr)))
+                    }
+                }
             }
-            None => {
-                let storage = Verify::new(Encrypted::new(self.key, s3));
-                Ok(Box::new(spawn_server(storage, &addr)))
-            }
+            None => match self.key {
+                Some(key) => {
+                    let storage = Verify::new(Encrypted::new(key, s3));
+                    Ok(Box::new(spawn_server(storage, &addr)))
+                }
+                None => {
+                    let storage = Verify::new(s3);
+                    Ok(Box::new(spawn_server(storage, &addr)))
+                }
+            },
         }
     }
 
@@ -202,24 +217,24 @@ impl S3ServerBuilder {
 #[derive(Debug)]
 pub struct LocalServerBuilder {
     path: PathBuf,
-    key: [u8; 32],
+    key: Option<[u8; 32]>,
     cache: Option<Cache>,
 }
 
 impl LocalServerBuilder {
     /// Creates a local server builder. `path` is the path to the folder where
     /// all of the LFS data will be stored.
-    pub fn new(path: PathBuf, key: [u8; 32]) -> Self {
+    pub fn new(path: PathBuf) -> Self {
         Self {
             path,
-            key,
+            key: None,
             cache: None,
         }
     }
 
     /// Sets the encryption key to use.
     pub fn key(&mut self, key: [u8; 32]) -> &mut Self {
-        self.key = key;
+        self.key = Some(key);
         self
     }
 
@@ -238,13 +253,24 @@ impl LocalServerBuilder {
     pub async fn spawn(
         self,
         addr: SocketAddr,
-    ) -> Result<impl Server, Box<dyn std::error::Error>> {
+    ) -> Result<Box<dyn Server + Unpin + Send>, Box<dyn std::error::Error>>
+    {
         let storage = Disk::new(self.path).map_err(Error::from).await?;
-        let storage = Verify::new(Encrypted::new(self.key, storage));
 
-        log::info!("Local disk storage initialized.");
-
-        Ok(spawn_server(storage, &addr))
+        match self.key {
+            Some(key) => {
+                let storage = Verify::new(Encrypted::new(key, storage));
+                log::info!("Local disk storage initialized (with encryption).");
+                Ok(Box::new(spawn_server(storage, &addr)))
+            }
+            None => {
+                let storage = Verify::new(storage);
+                log::info!(
+                    "Local disk storage initialized (without encryption)."
+                );
+                Ok(Box::new(spawn_server(storage, &addr)))
+            }
+        }
     }
 
     /// Spawns the server and runs it to completion. This will run forever

@@ -19,6 +19,7 @@
 // SOFTWARE.
 mod common;
 
+use std::io;
 use std::net::SocketAddr;
 use std::path::Path;
 
@@ -26,13 +27,14 @@ use futures::future::Either;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rudolfs::{LocalServerBuilder, Server};
+use rudolfs::LocalServerBuilder;
 use tokio::sync::oneshot;
 
 use common::{init_logger, GitRepo};
 
 #[tokio::test(flavor = "multi_thread")]
-async fn local_smoke_test() -> Result<(), Box<dyn std::error::Error>> {
+async fn local_smoke_test_encrypted() -> Result<(), Box<dyn std::error::Error>>
+{
     init_logger();
 
     // Make sure our seed is deterministic. This makes it easier to reproduce
@@ -42,7 +44,8 @@ async fn local_smoke_test() -> Result<(), Box<dyn std::error::Error>> {
     let data = tempfile::TempDir::new()?;
     let key = rng.gen();
 
-    let server = LocalServerBuilder::new(data.path().into(), key);
+    let mut server = LocalServerBuilder::new(data.path().into());
+    server.key(key);
     let server = server.spawn(SocketAddr::from(([0, 0, 0, 0], 0))).await?;
     let addr = server.addr();
 
@@ -50,10 +53,55 @@ async fn local_smoke_test() -> Result<(), Box<dyn std::error::Error>> {
 
     let server = tokio::spawn(futures::future::select(shutdown_rx, server));
 
+    exercise_server(addr, &mut rng)?;
+
+    shutdown_tx.send(()).expect("server died too soon");
+
+    if let Either::Right((result, _)) = server.await? {
+        // If the server exited first, then propagate the error.
+        result?;
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn local_smoke_test_unencrypted() -> Result<(), Box<dyn std::error::Error>>
+{
+    init_logger();
+
+    // Make sure our seed is deterministic. This makes it easier to reproduce
+    // the same repo every time.
+    let mut rng = StdRng::seed_from_u64(42);
+
+    let data = tempfile::TempDir::new()?;
+
+    let server = LocalServerBuilder::new(data.path().into());
+    let server = server.spawn(SocketAddr::from(([0, 0, 0, 0], 0))).await?;
+    let addr = server.addr();
+
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+    let server = tokio::spawn(futures::future::select(shutdown_rx, server));
+
+    exercise_server(addr, &mut rng)?;
+
+    shutdown_tx.send(()).expect("server died too soon");
+
+    if let Either::Right((result, _)) = server.await? {
+        // If the server exited first, then propagate the error.
+        result?;
+    }
+
+    Ok(())
+}
+
+/// Creates a repository with a few LFS files in it to exercise the LFS server.
+fn exercise_server(addr: SocketAddr, rng: &mut impl Rng) -> io::Result<()> {
     let repo = GitRepo::init(addr)?;
-    repo.add_random(Path::new("4mb.bin"), 4 * 1024 * 1024, &mut rng)?;
-    repo.add_random(Path::new("8mb.bin"), 8 * 1024 * 1024, &mut rng)?;
-    repo.add_random(Path::new("16mb.bin"), 16 * 1024 * 1024, &mut rng)?;
+    repo.add_random(Path::new("4mb.bin"), 4 * 1024 * 1024, rng)?;
+    repo.add_random(Path::new("8mb.bin"), 8 * 1024 * 1024, rng)?;
+    repo.add_random(Path::new("16mb.bin"), 16 * 1024 * 1024, rng)?;
     repo.commit("Add LFS objects")?;
 
     // Make sure we can push LFS objects to the server.
@@ -73,19 +121,12 @@ async fn local_smoke_test() -> Result<(), Box<dyn std::error::Error>> {
     repo_clone.lfs_pull()?;
 
     // Add some more files and make sure you can pull those into the clone
-    repo.add_random(Path::new("4mb_2.bin"), 4 * 1024 * 1024, &mut rng)?;
-    repo.add_random(Path::new("8mb_2.bin"), 8 * 1024 * 1024, &mut rng)?;
-    repo.add_random(Path::new("16mb_2.bin"), 16 * 1024 * 1024, &mut rng)?;
+    repo.add_random(Path::new("4mb_2.bin"), 4 * 1024 * 1024, rng)?;
+    repo.add_random(Path::new("8mb_2.bin"), 8 * 1024 * 1024, rng)?;
+    repo.add_random(Path::new("16mb_2.bin"), 16 * 1024 * 1024, rng)?;
     repo.commit("Add LFS objects 2")?;
 
     repo_clone.pull()?;
-
-    shutdown_tx.send(()).expect("server died too soon");
-
-    if let Either::Right((result, _)) = server.await? {
-        // If the server exited first, then propagate the error.
-        result?;
-    }
 
     Ok(())
 }
