@@ -38,6 +38,7 @@
 mod common;
 
 use std::fs;
+use std::io;
 use std::net::SocketAddr;
 use std::path::Path;
 
@@ -59,26 +60,32 @@ struct Credentials {
     bucket: String,
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn s3_smoke_test() -> Result<(), Box<dyn std::error::Error>> {
-    init_logger();
-
-    let config = match fs::read("tests/.test_credentials.toml") {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            eprintln!("Skipping test. No S3 credentials available: {}", err);
-            return Ok(());
-        }
-    };
+fn load_s3_credentials() -> io::Result<Credentials> {
+    let config = fs::read("tests/.test_credentials.toml")?;
 
     // Try to load S3 credentials `.test_credentials.toml`. If they don't exist,
     // then we can't really run this test. Note that these should be completely
     // separate credentials than what is used in production.
     let creds: Credentials = toml::from_slice(&config)?;
 
-    std::env::set_var("AWS_ACCESS_KEY_ID", creds.access_key_id);
-    std::env::set_var("AWS_SECRET_ACCESS_KEY", creds.secret_access_key);
-    std::env::set_var("AWS_DEFAULT_REGION", creds.default_region);
+    std::env::set_var("AWS_ACCESS_KEY_ID", &creds.access_key_id);
+    std::env::set_var("AWS_SECRET_ACCESS_KEY", &creds.secret_access_key);
+    std::env::set_var("AWS_DEFAULT_REGION", &creds.default_region);
+
+    Ok(creds)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_smoke_test_encrypted() -> Result<(), Box<dyn std::error::Error>> {
+    init_logger();
+
+    let creds = match load_s3_credentials() {
+        Ok(creds) => creds,
+        Err(err) => {
+            eprintln!("Skipping test. No S3 credentials available: {}", err);
+            return Ok(());
+        }
+    };
 
     // Make sure our seed is deterministic. This prevents us from filling up our
     // S3 bucket with a bunch of random files if this test gets ran a bunch of
@@ -87,7 +94,8 @@ async fn s3_smoke_test() -> Result<(), Box<dyn std::error::Error>> {
 
     let key = rng.gen();
 
-    let mut server = S3ServerBuilder::new(creds.bucket, key);
+    let mut server = S3ServerBuilder::new(creds.bucket);
+    server.key(key);
     server.prefix("test_lfs".into());
 
     let server = server.spawn(SocketAddr::from(([0, 0, 0, 0], 0))).await?;
@@ -97,10 +105,63 @@ async fn s3_smoke_test() -> Result<(), Box<dyn std::error::Error>> {
 
     let server = tokio::spawn(futures::future::select(shutdown_rx, server));
 
+    exercise_server(addr, &mut rng)?;
+
+    shutdown_tx.send(()).expect("server died too soon");
+
+    if let Either::Right((result, _)) = server.await.unwrap() {
+        // If the server exited first, then propagate the error.
+        result.expect("server failed unexpectedly");
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s3_smoke_test_unencrypted() -> Result<(), Box<dyn std::error::Error>> {
+    init_logger();
+
+    let creds = match load_s3_credentials() {
+        Ok(creds) => creds,
+        Err(err) => {
+            eprintln!("Skipping test. No S3 credentials available: {}", err);
+            return Ok(());
+        }
+    };
+
+    // Make sure our seed is deterministic. This prevents us from filling up our
+    // S3 bucket with a bunch of random files if this test gets ran a bunch of
+    // times.
+    let mut rng = StdRng::seed_from_u64(42);
+
+    let mut server = S3ServerBuilder::new(creds.bucket);
+    server.prefix("test_lfs".into());
+
+    let server = server.spawn(SocketAddr::from(([0, 0, 0, 0], 0))).await?;
+    let addr = server.addr();
+
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+    let server = tokio::spawn(futures::future::select(shutdown_rx, server));
+
+    exercise_server(addr, &mut rng)?;
+
+    shutdown_tx.send(()).expect("server died too soon");
+
+    if let Either::Right((result, _)) = server.await.unwrap() {
+        // If the server exited first, then propagate the error.
+        result.expect("server failed unexpectedly");
+    }
+
+    Ok(())
+}
+
+/// Creates a repository with a few LFS files in it to exercise the LFS server.
+fn exercise_server(addr: SocketAddr, rng: &mut impl Rng) -> io::Result<()> {
     let repo = GitRepo::init(addr)?;
-    repo.add_random(Path::new("4mb.bin"), 4 * 1024 * 1024, &mut rng)?;
-    repo.add_random(Path::new("8mb.bin"), 8 * 1024 * 1024, &mut rng)?;
-    repo.add_random(Path::new("16mb.bin"), 16 * 1024 * 1024, &mut rng)?;
+    repo.add_random(Path::new("4mb.bin"), 4 * 1024 * 1024, rng)?;
+    repo.add_random(Path::new("8mb.bin"), 8 * 1024 * 1024, rng)?;
+    repo.add_random(Path::new("16mb.bin"), 16 * 1024 * 1024, rng)?;
     repo.commit("Add LFS objects")?;
 
     // Make sure we can push LFS objects to the server.
@@ -112,13 +173,6 @@ async fn s3_smoke_test() -> Result<(), Box<dyn std::error::Error>> {
 
     // Push again. This should be super fast.
     repo.lfs_push().unwrap();
-
-    shutdown_tx.send(()).expect("server died too soon");
-
-    if let Either::Right((result, _)) = server.await.unwrap() {
-        // If the server exited first, then propagate the error.
-        result.expect("server failed unexpectedly");
-    }
 
     Ok(())
 }
