@@ -24,6 +24,7 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::Mutex;
 
 use duct::cmd;
 use rand::Rng;
@@ -46,7 +47,9 @@ impl GitRepo {
         let path = repo.path();
 
         cmd!("git", "init", ".").dir(path).run()?;
-        cmd!("git", "lfs", "install").dir(path).run()?;
+
+        git_lfs_install(path)?;
+
         cmd!("git", "remote", "add", "origin", "fake_remote")
             .dir(path)
             .run()?;
@@ -166,4 +169,17 @@ pub fn init_logger() {
         .is_test(true)
         // Ignore errors initializing the logger if tests race to configure it
         .try_init();
+}
+
+/// Runs `git lfs install`, but serializes it across unit tests. Tests are flaky
+/// if this is not done because it tries to overwrite `~/.gitconfig` and races
+/// with itself.
+fn git_lfs_install(path: &Path) -> io::Result<()> {
+    static LFS_INSTALL: Mutex<()> = Mutex::new(());
+
+    let _guard = LFS_INSTALL.lock().unwrap();
+
+    cmd!("git", "lfs", "install").dir(path).run()?;
+
+    Ok(())
 }
