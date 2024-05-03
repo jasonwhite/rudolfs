@@ -50,7 +50,7 @@ use rudolfs::S3ServerBuilder;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
-use common::{init_logger, GitRepo};
+use common::{init_logger, GitRepo, SERVER_ADDR};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Credentials {
@@ -98,7 +98,7 @@ async fn s3_smoke_test_encrypted() -> Result<(), Box<dyn std::error::Error>> {
     server.key(key);
     server.prefix("test_lfs".into());
 
-    let server = server.spawn(SocketAddr::from(([0, 0, 0, 0], 0))).await?;
+    let server = server.spawn(SERVER_ADDR).await?;
     let addr = server.addr();
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -137,7 +137,7 @@ async fn s3_smoke_test_unencrypted() -> Result<(), Box<dyn std::error::Error>> {
     let mut server = S3ServerBuilder::new(creds.bucket);
     server.prefix("test_lfs".into());
 
-    let server = server.spawn(SocketAddr::from(([0, 0, 0, 0], 0))).await?;
+    let server = server.spawn(SERVER_ADDR).await?;
     let addr = server.addr();
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel();

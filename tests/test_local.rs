@@ -30,7 +30,7 @@ use rand::SeedableRng;
 use rudolfs::LocalServerBuilder;
 use tokio::sync::oneshot;
 
-use common::{init_logger, GitRepo};
+use common::{init_logger, GitRepo, SERVER_ADDR};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn local_smoke_test_encrypted() -> Result<(), Box<dyn std::error::Error>>
@@ -46,7 +46,7 @@ async fn local_smoke_test_encrypted() -> Result<(), Box<dyn std::error::Error>>
 
     let mut server = LocalServerBuilder::new(data.path().into());
     server.key(key);
-    let server = server.spawn(SocketAddr::from(([0, 0, 0, 0], 0))).await?;
+    let server = server.spawn(SERVER_ADDR).await?;
     let addr = server.addr();
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -77,7 +77,7 @@ async fn local_smoke_test_unencrypted() -> Result<(), Box<dyn std::error::Error>
     let data = tempfile::TempDir::new()?;
 
     let server = LocalServerBuilder::new(data.path().into());
-    let server = server.spawn(SocketAddr::from(([0, 0, 0, 0], 0))).await?;
+    let server = server.spawn(SERVER_ADDR).await?;
     let addr = server.addr();
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel();

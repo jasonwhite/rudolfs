@@ -20,11 +20,18 @@
 #![allow(unused)]
 use std::fs::{self, File};
 use std::io;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::path::Path;
 
 use duct::cmd;
 use rand::Rng;
+
+/// Bind test server to localhost port 0. We don't want this server to be
+/// externally visible.
+pub const SERVER_ADDR: SocketAddr =
+    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
 
 /// A temporary git repository.
 pub struct GitRepo {
