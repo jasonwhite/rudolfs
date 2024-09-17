@@ -89,9 +89,8 @@ where
     /// Removes an entry from the cache. Returns the size of the object if it
     /// exists, or `None` if it didn't exist in the cache.
     pub fn remove(&mut self, key: &K) -> Option<u64> {
-        self.map.remove(key).map(|size| {
+        self.map.remove(key).inspect(|size| {
             self.size -= size;
-            size
         })
     }
 
