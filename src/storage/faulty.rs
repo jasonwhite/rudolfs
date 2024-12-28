@@ -132,7 +132,7 @@ where
 }
 
 #[derive(Debug, Display)]
-#[display(fmt = "injected fault")]
+#[display("injected fault")]
 pub struct FaultError;
 
 impl std::error::Error for FaultError {}

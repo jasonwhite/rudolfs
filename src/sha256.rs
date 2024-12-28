@@ -70,7 +70,7 @@ impl Sha256 {
 
 pub struct Sha256Path<'a>(&'a Sha256);
 
-impl<'a> fmt::Display for Sha256Path<'a> {
+impl fmt::Display for Sha256Path<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -169,7 +169,7 @@ impl<'de> Deserialize<'de> for Sha256 {
     {
         struct Sha256Visitor;
 
-        impl<'de> Visitor<'de> for Sha256Visitor {
+        impl Visitor<'_> for Sha256Visitor {
             type Value = Sha256;
 
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {

@@ -26,7 +26,7 @@ mod retrying;
 mod s3;
 mod verify;
 
-pub use cached::{Backend as Cached, Error as CacheError};
+pub use cached::Backend as Cached;
 pub use disk::Backend as Disk;
 pub use encrypt::Backend as Encrypted;
 #[cfg(feature = "faulty")]

@@ -52,7 +52,7 @@ toml = "0.5"
 
 [dependencies.rusoto_core]
 version = "0.48"
-default_features = false
+default-features = false
 features = ["rustls"]
 
 [dependencies.rusoto_credential]
@@ -61,11 +61,11 @@ version = "0.48"
 [dependencies.rusoto_sts]
 version = "0.48"
 features = ["rustls"]
-default_features = false
+default-features = false
 
 [dependencies.rusoto_s3]
 version = "0.48"
-default_features = false
+default-features = false
 features = ["rustls"]
 
 [features]
