@@ -31,8 +31,6 @@ humansize = "2"
 humantime = "2"
 hyper = { version = "0.14", features = ["server", "http1", "http2", "tcp", "stream"] }
 linked-hash-map = { version = "0.5", features = ["serde_impl"] }
-log = "0.4"
-pretty_env_logger = "0.4"
 rand = { version = "0.8", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -40,6 +38,8 @@ sha2 = "0.10"
 structopt = "0.3"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
 uuid = { version = "1.1", features = ["v4"] }
 
@@ -47,7 +47,6 @@ uuid = { version = "1.1", features = ["v4"] }
 rand = "0.8"
 tempfile = "3"
 duct = "0.13"
-env_logger = "0.9"
 toml = "0.5"
 
 [dependencies.rusoto_core]

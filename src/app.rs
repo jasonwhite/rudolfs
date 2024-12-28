@@ -336,7 +336,7 @@ where
     let size = match size {
         Ok(size) => size,
         Err(err) => {
-            log::error!("batch response error: {}", err);
+            tracing::error!("batch response error: {err}");
 
             // Return a generic "500 - Internal Server Error" for objects that
             // we failed to get the size of. This is usually caused by some

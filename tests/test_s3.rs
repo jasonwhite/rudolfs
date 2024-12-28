@@ -77,7 +77,7 @@ fn load_s3_credentials() -> io::Result<Credentials> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s3_smoke_test_encrypted() -> Result<(), Box<dyn std::error::Error>> {
-    init_logger();
+    let _guard = init_logger();
 
     let creds = match load_s3_credentials() {
         Ok(creds) => creds,
@@ -119,7 +119,7 @@ async fn s3_smoke_test_encrypted() -> Result<(), Box<dyn std::error::Error>> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s3_smoke_test_unencrypted() -> Result<(), Box<dyn std::error::Error>> {
-    init_logger();
+    let _guard = init_logger();
 
     let creds = match load_s3_credentials() {
         Ok(creds) => creds,

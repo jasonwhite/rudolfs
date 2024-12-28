@@ -141,13 +141,13 @@ impl S3ServerBuilder {
         let prefix = self.prefix.unwrap_or_else(|| String::from("lfs"));
 
         if self.cdn.is_some() {
-            log::warn!(
+            tracing::warn!(
                 "A CDN was specified. Since uploads and downloads do not flow \
                  through Rudolfs in this case, they will *not* be encrypted."
             );
 
             if self.cache.take().is_some() {
-                log::warn!(
+                tracing::warn!(
                     "A local disk cache does not work with a CDN and will be \
                      disabled."
                 );
@@ -207,7 +207,7 @@ impl S3ServerBuilder {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let server = self.spawn(addr).await?;
 
-        log::info!("Listening on {}", server.addr());
+        tracing::info!("Listening on {}", server.addr());
 
         server.await?;
         Ok(())
@@ -260,12 +260,14 @@ impl LocalServerBuilder {
         match self.key {
             Some(key) => {
                 let storage = Verify::new(Encrypted::new(key, storage));
-                log::info!("Local disk storage initialized (with encryption).");
+                tracing::info!(
+                    "Local disk storage initialized (with encryption)."
+                );
                 Ok(Box::new(spawn_server(storage, &addr)))
             }
             None => {
                 let storage = Verify::new(storage);
-                log::info!(
+                tracing::info!(
                     "Local disk storage initialized (without encryption)."
                 );
                 Ok(Box::new(spawn_server(storage, &addr)))
@@ -281,7 +283,7 @@ impl LocalServerBuilder {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let server = self.spawn(addr).await?;
 
-        log::info!("Listening on {}", server.addr());
+        tracing::info!("Listening on {}", server.addr());
 
         server.await?;
         Ok(())

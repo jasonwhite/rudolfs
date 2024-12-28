@@ -105,7 +105,7 @@ where
     ) -> Result<Self, C::Error> {
         let lru = Cache::from_stream(cache.list()).await?;
 
-        log::info!(
+        tracing::info!(
             "Prepopulated cache with {} entries ({})",
             lru.len(),
             humansize::format_size(lru.size(), humansize::DECIMAL),
@@ -120,7 +120,7 @@ where
         let count = prune_cache(lru.clone(), max_size, cache.clone()).await?;
 
         if count > 0 {
-            log::info!("Pruned {} entries from the cache", count);
+            tracing::info!("Pruned {} entries from the cache", count);
         }
 
         Ok(Backend {
@@ -153,7 +153,7 @@ where
 
     while lru.size() > max_size {
         if let Some((key, _)) = lru.pop() {
-            log::debug!("Pruning '{}' from cache", key);
+            tracing::debug!("Pruning '{}' from cache", key);
             let _ = storage.delete(&key).await;
             deleted += 1;
         }
@@ -176,9 +176,9 @@ where
 
     let oid = *key.oid();
 
-    log::debug!("Caching {}", oid);
+    tracing::debug!("Caching {}", oid);
     cache.put(key.clone(), obj).await?;
-    log::debug!("Finished caching {}", oid);
+    tracing::debug!("Finished caching {}", oid);
 
     // Add the object info to our LRU cache once the download from
     // permanent storage is complete.
@@ -190,13 +190,13 @@ where
     match prune_cache(lru, max_size, cache).await {
         Ok(count) => {
             if count > 0 {
-                log::info!("Pruned {} entries from the cache", count);
+                tracing::info!("Pruned {} entries from the cache", count);
             }
 
             Ok(())
         }
         Err(err) => {
-            log::error!("Error caching {} ({})", oid, err);
+            tracing::error!("Error caching {} ({})", oid, err);
             Err(err)
         }
     }
@@ -268,7 +268,7 @@ where
                     future::try_join(f.map_err(Error::from_stream), cache)
                         .map_ok(|((), ())| ())
                         .map_err(move |err: Self::Error| {
-                            log::error!("Error caching {} ({})", key, err);
+                            tracing::error!("Error caching {} ({})", key, err);
                         }),
                 );
 
@@ -312,7 +312,7 @@ where
             .put(key.clone(), a)
             .map_ok(move |()| {
                 // Send a signal to the cache so that it can complete its write.
-                log::debug!("Received last chunk from server.");
+                tracing::debug!("Received last chunk from server.");
                 signal_sender.send(()).unwrap_or(())
             })
             .map_err(Error::from_storage);
@@ -360,7 +360,7 @@ where
     async fn delete(&self, key: &StorageKey) -> Result<(), Self::Error> {
         // Only ever delete items from the cache. This may be called when
         // a corrupted object is detected.
-        log::info!("Deleted {} from the cache", key);
+        tracing::info!("Deleted {} from the cache", key);
         self.cache.delete(key).await.map_err(Error::from_cache)
     }
 

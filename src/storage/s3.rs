@@ -176,7 +176,7 @@ impl Backend {
             Region::default()
         };
 
-        log::info!(
+        tracing::info!(
             "Connecting to S3 bucket '{}' at region '{}'",
             bucket,
             region.name()
@@ -187,7 +187,7 @@ impl Backend {
 
         let (client, credential_provider): (_, BoxedCredentialProvider) =
             if k8s_provider.credentials().await.is_ok() {
-                log::info!("Using credentials from Kubernetes");
+                tracing::info!("Using credentials from Kubernetes");
                 let provider = AutoRefreshingProvider::new(k8s_provider)?;
                 let client = S3Client::new_with(
                     HttpClient::new()?,
@@ -248,7 +248,7 @@ impl<C> Backend<C> {
         })
         .await?;
 
-        log::info!("Successfully authorized with AWS");
+        tracing::info!("Successfully authorized with AWS");
 
         Ok(Backend {
             client,

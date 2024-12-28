@@ -35,7 +35,7 @@ use common::{init_logger, GitRepo, SERVER_ADDR};
 #[tokio::test(flavor = "multi_thread")]
 async fn local_smoke_test_encrypted() -> Result<(), Box<dyn std::error::Error>>
 {
-    init_logger();
+    let _guard = init_logger();
 
     // Make sure our seed is deterministic. This makes it easier to reproduce
     // the same repo every time.
@@ -68,7 +68,7 @@ async fn local_smoke_test_encrypted() -> Result<(), Box<dyn std::error::Error>>
 #[tokio::test(flavor = "multi_thread")]
 async fn local_smoke_test_unencrypted() -> Result<(), Box<dyn std::error::Error>>
 {
-    init_logger();
+    let _guard = init_logger();
 
     // Make sure our seed is deterministic. This makes it easier to reproduce
     // the same repo every time.

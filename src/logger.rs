@@ -68,7 +68,7 @@ where
 
         Box::pin(self.service.call(req).inspect(
             move |response| match response {
-                Ok(response) => log::info!(
+                Ok(response) => tracing::info!(
                     "[{}] {} {} - {} ({})",
                     remote_addr.ip(),
                     method,
@@ -76,7 +76,7 @@ where
                     response.status(),
                     format_duration(start.elapsed()),
                 ),
-                Err(err) => log::error!(
+                Err(err) => tracing::error!(
                     "[{}] {} {} - {} ({})",
                     remote_addr.ip(),
                     method,

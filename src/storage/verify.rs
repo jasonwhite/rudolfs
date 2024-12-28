@@ -92,7 +92,7 @@ where
                 let stream = stream.map_err(move |err| {
                     match err {
                         Error::Verify(err) => {
-                            log::error!(
+                            tracing::error!(
                                 "Found corrupted object {} ({})",
                                 key.oid(),
                                 err

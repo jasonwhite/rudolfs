@@ -161,14 +161,13 @@ where
     Ok(())
 }
 
-pub fn init_logger() {
-    let _ = env_logger::builder()
-        // Include all events in tests
-        .filter_module("rudolfs", log::LevelFilter::max())
-        // Ensure events are captured by `cargo test`
-        .is_test(true)
-        // Ignore errors initializing the logger if tests race to configure it
-        .try_init();
+/// Sets the default subscriber for the current thread until the guard is
+/// dropped.
+///
+/// NOTE: Use `cargo test -- --nocapture` to see server logs.
+pub fn init_logger() -> tracing::subscriber::DefaultGuard {
+    let subscriber = tracing_subscriber::fmt().with_test_writer().finish();
+    tracing::subscriber::set_default(subscriber)
 }
 
 /// Runs `git lfs install`, but serializes it across unit tests. Tests are flaky
