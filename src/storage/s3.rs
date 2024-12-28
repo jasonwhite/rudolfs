@@ -73,13 +73,13 @@ impl ::std::error::Error for Error {}
 
 #[derive(Debug, Display)]
 pub enum InitError {
-    #[display(fmt = "Invalid S3 bucket name")]
+    #[display("Invalid S3 bucket name")]
     Bucket,
 
-    #[display(fmt = "Invalid S3 credentials")]
+    #[display("Invalid S3 credentials")]
     Credentials,
 
-    #[display(fmt = "{}", _0)]
+    #[display("{_0}")]
     Other(String),
 }
 

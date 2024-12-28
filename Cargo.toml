@@ -21,7 +21,7 @@ async-trait = "0.1"
 backoff = { version = "0.4", features = ["tokio"] }
 bytes = "1"
 chacha = "0.3"
-derive_more = "0.99"
+derive_more = { version = "1", features = ["display", "from"] }
 futures = "0.3"
 generic-array = "0.14"
 hex = "0.4"
