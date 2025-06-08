@@ -17,25 +17,4 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-use std::io;
-
-use derive_more::{Display, From};
-
-use crate::sha256::{Sha256Error, Sha256VerifyError};
-use crate::storage::{self, Storage};
-
-// Define a type so we can return multiple types of errors
-#[derive(Debug, From, Display)]
-pub enum Error {
-    Io(io::Error),
-    Http(http::Error),
-    Hyper(hyper::Error),
-    Json(serde_json::Error),
-    Sha256(Sha256Error),
-    Sha256Verify(Sha256VerifyError),
-    S3(storage::S3Error),
-    S3DiskCache(<storage::S3DiskCache as Storage>::Error),
-    Askama(askama::Error),
-}
-
-impl std::error::Error for Error {}
+pub use anyhow::Error;

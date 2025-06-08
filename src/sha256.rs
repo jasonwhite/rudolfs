@@ -63,7 +63,7 @@ impl Sha256 {
     }
 
     /// Returns an object that can be formatted as a path.
-    pub fn path(&self) -> Sha256Path {
+    pub fn path(&self) -> Sha256Path<'_> {
         Sha256Path(self)
     }
 }

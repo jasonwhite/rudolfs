@@ -32,7 +32,7 @@ pub use encrypt::Backend as Encrypted;
 #[cfg(feature = "faulty")]
 pub use faulty::Backend as Faulty;
 pub use retrying::Backend as Retrying;
-pub use s3::{Backend as S3, Error as S3Error};
+pub use s3::Backend as S3;
 pub use verify::Backend as Verify;
 
 use crate::lfs::Oid;
@@ -51,8 +51,6 @@ use futures::{
     stream::{BoxStream, Stream, StreamExt},
     Future,
 };
-
-pub type S3DiskCache = Cached<Disk, S3>;
 
 /// Stream returned by storage operations.
 pub type StorageStream<T, E> = BoxStream<'static, Result<T, E>>;
@@ -166,9 +164,7 @@ impl LFSObject {
         let (sender_a, receiver_a) = mpsc::channel::<Bytes>(0);
         let (sender_b, receiver_b) = mpsc::channel::<Bytes>(0);
 
-        let sink = sender_a
-            .fanout(sender_b)
-            .sink_map_err(|e| io::Error::new(io::ErrorKind::Other, e));
+        let sink = sender_a.fanout(sender_b).sink_map_err(io::Error::other);
 
         let receiver_a = receiver_a.map(|x| -> io::Result<_> { Ok(x) });
         let receiver_b = receiver_b.map(|x| -> io::Result<_> { Ok(x) });

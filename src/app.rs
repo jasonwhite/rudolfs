@@ -204,9 +204,7 @@ where
         };
 
         // Verify the SHA256 of the uploaded object as it is being uploaded.
-        let stream = req
-            .into_body()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
+        let stream = req.into_body().map_err(io::Error::other);
 
         let object = LFSObject::new(len, Box::pin(stream));
 
@@ -401,8 +399,7 @@ where
                         }),
                         verify: Some(lfs::Action {
                             href: format!(
-                                "{}api/{}/objects/verify",
-                                uri, namespace
+                                "{uri}api/{namespace}/objects/verify"
                             ),
                             header: extract_auth_header(headers),
                             expires_in: None,

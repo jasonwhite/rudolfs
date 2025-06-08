@@ -325,7 +325,7 @@ where
         let stream = stream.chain(
             signal_receiver
                 .map_ok(|()| Bytes::new())
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+                .map_err(io::Error::other)
                 .into_stream(),
         );
 

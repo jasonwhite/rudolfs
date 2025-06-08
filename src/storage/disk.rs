@@ -117,10 +117,7 @@ impl Storage for Backend {
             // If we didn't get a full object, we cannot save it to disk. This
             // can happen if we're using the disk as a cache and there is an
             // error in the middle of the upload.
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "got incomplete object",
-            ))
+            Err(io::Error::other("got incomplete object"))
         } else {
             fs::create_dir_all(dir).await?;
             file.persist(path).await?;
