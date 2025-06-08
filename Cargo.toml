@@ -1,6 +1,6 @@
 [package]
 name = "rudolfs"
-version = "0.3.7"
+version = "0.3.8"
 authors = ["Jason White <rust@jasonwhite.io>"]
 edition = "2021"
 description = """

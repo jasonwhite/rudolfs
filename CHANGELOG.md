@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.8
+
+ - Send html content type on index page
+ - Minor dependency updates and lint fixes
+
 ## v0.3.7
 
  - Made encryption optional. If `--key` is not specified, LFS objects are not
