@@ -32,7 +32,7 @@ use serde::{
     ser::Serializer,
 };
 
-use generic_array::{GenericArray, typenum};
+use hybrid_array::{Array, typenum};
 use sha2::{self, Digest};
 
 /// An error associated with parsing a SHA256.
@@ -55,7 +55,7 @@ impl std::error::Error for Sha256Error {}
 
 /// A Git LFS object ID (i.e., a SHA256).
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Default)]
-pub struct Sha256(GenericArray<u8, typenum::U32>);
+pub struct Sha256(Array<u8, typenum::U32>);
 
 impl Sha256 {
     pub fn bytes(&self) -> &[u8] {
@@ -94,8 +94,8 @@ impl From<[u8; 32]> for Sha256 {
     }
 }
 
-impl From<GenericArray<u8, typenum::U32>> for Sha256 {
-    fn from(arr: GenericArray<u8, typenum::U32>) -> Self {
+impl From<Array<u8, typenum::U32>> for Sha256 {
+    fn from(arr: Array<u8, typenum::U32>) -> Self {
         Sha256(arr)
     }
 }
