@@ -15,14 +15,14 @@ categories = ["command-line-utilities"]
 license = "MIT"
 
 [dependencies]
-askama = "0.11"
+askama = "0.14"
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 backoff = { version = "0.4", features = ["tokio"] }
 bytes = "1"
-chacha = "0.3"
-derive_more = { version = "1", features = ["display", "from"] }
+chacha = "0.4"
+derive_more = { version = "2", features = ["display", "from"] }
 futures = "0.3"
 generic-array = "0.14"
 hex = "0.4"
@@ -32,7 +32,7 @@ humansize = "2"
 humantime = "2"
 hyper = { version = "0.14", features = ["server", "http1", "http2", "tcp", "stream"] }
 linked-hash-map = { version = "0.5", features = ["serde_impl"] }
-rand = { version = "0.8", optional = true }
+rand = { version = "0.9", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -45,10 +45,10 @@ url = "2"
 uuid = { version = "1.1", features = ["v4"] }
 
 [dev-dependencies]
-rand = "0.8"
+rand = "0.9"
 tempfile = "3"
-duct = "0.13"
-toml = "0.5"
+duct = "1.1"
+toml = "0.9"
 
 [dependencies.rusoto_core]
 version = "0.48"
