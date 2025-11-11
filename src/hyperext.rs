@@ -17,10 +17,11 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+use hyper::{
+    Request,
+    http::uri::{self, Authority, Scheme, Uri},
+};
 use std::convert::TryFrom;
-
-use http::uri::{self, Authority, Scheme, Uri};
-use hyper::Request;
 
 pub trait RequestExt {
     /// Gets the scheme based on the headers in the request.

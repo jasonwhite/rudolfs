@@ -25,7 +25,6 @@ chacha = "0.4"
 derive_more = { version = "2", features = ["display", "from"] }
 futures = "0.3"
 hex = "0.4"
-http = "0.2"
 human-size = "0.4"
 humansize = "2"
 humantime = "2"

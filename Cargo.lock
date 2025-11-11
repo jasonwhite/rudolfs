@@ -1294,7 +1294,6 @@ dependencies = [
  "duct",
  "futures",
  "hex",
- "http",
  "human-size",
  "humansize",
  "humantime",

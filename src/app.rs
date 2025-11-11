@@ -28,9 +28,11 @@ use futures::{
     future::{self, BoxFuture},
     stream::TryStreamExt,
 };
-use http::HeaderMap;
-use http::{self, StatusCode, Uri, header};
-use hyper::{self, Method, Request, Response, body::Body, service::Service};
+
+use hyper::{
+    self, HeaderMap, Method, Request, Response, StatusCode, Uri, body::Body,
+    header, service::Service,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
@@ -464,7 +466,7 @@ fn extract_auth_header(
     headers: &HeaderMap,
 ) -> Option<BTreeMap<String, String>> {
     let headers = headers.iter().filter_map(|(k, v)| {
-        if k == http::header::AUTHORIZATION {
+        if k == header::AUTHORIZATION {
             let value = String::from_utf8_lossy(v.as_bytes()).to_string();
             Some((k.to_string(), value))
         } else {
