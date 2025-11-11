@@ -44,7 +44,7 @@ use hyper::{
 use crate::app::App;
 use crate::error::Error;
 use crate::logger::Logger;
-use crate::storage::{Cached, Disk, Encrypted, Retrying, Storage, Verify, S3};
+use crate::storage::{Cached, Disk, Encrypted, Retrying, S3, Storage, Verify};
 
 #[cfg(feature = "faulty")]
 use crate::storage::Faulty;
@@ -290,7 +290,7 @@ impl LocalServerBuilder {
     }
 }
 
-fn spawn_server<S>(storage: S, addr: &SocketAddr) -> impl Server
+fn spawn_server<S>(storage: S, addr: &SocketAddr) -> impl Server + use<S>
 where
     S: Storage + Send + Sync + 'static,
     S::Error: Into<Error>,

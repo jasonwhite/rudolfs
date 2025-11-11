@@ -21,8 +21,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use backoff::future::retry;
 use backoff::ExponentialBackoff;
+use backoff::future::retry;
 
 use super::{LFSObject, Storage, StorageKey, StorageStream};
 

@@ -54,7 +54,7 @@ impl<S> Backend<S> {
 
 fn faulty_stream(stream: ByteStream) -> ByteStream {
     Box::pin(stream.map(|item| {
-        if rand::thread_rng().gen::<u8>() == 0 {
+        if rand::thread_rng().r#gen::<u8>() == 0 {
             Err(io::Error::other("injected fault"))
         } else {
             item

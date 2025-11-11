@@ -24,13 +24,13 @@ use std::net::SocketAddr;
 use std::path::Path;
 
 use futures::future::Either;
-use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use rudolfs::LocalServerBuilder;
 use tokio::sync::oneshot;
 
-use common::{init_logger, GitRepo, SERVER_ADDR};
+use common::{GitRepo, SERVER_ADDR, init_logger};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn local_smoke_test_encrypted() -> Result<(), Box<dyn std::error::Error>>
@@ -42,7 +42,7 @@ async fn local_smoke_test_encrypted() -> Result<(), Box<dyn std::error::Error>>
     let mut rng = StdRng::seed_from_u64(42);
 
     let data = tempfile::TempDir::new()?;
-    let key = rng.gen();
+    let key = rng.r#gen();
 
     let mut server = LocalServerBuilder::new(data.path().into());
     server.key(key);

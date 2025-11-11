@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 use async_trait::async_trait;
-use backoff::future::retry;
 use backoff::ExponentialBackoff;
+use backoff::future::retry;
 use bytes::{Bytes, BytesMut};
 use derive_more::{Display, From};
 use futures::{stream, stream::TryStreamExt};
@@ -34,8 +34,8 @@ use rusoto_s3::{
     CompletedMultipartUpload, CompletedPart, CreateMultipartUploadError,
     CreateMultipartUploadRequest, GetObjectError, GetObjectRequest,
     HeadBucketError, HeadBucketRequest, HeadObjectError, HeadObjectRequest,
-    PutObjectError, PutObjectRequest, S3Client, StreamingBody, UploadPartError,
-    UploadPartRequest, S3,
+    PutObjectError, PutObjectRequest, S3, S3Client, StreamingBody,
+    UploadPartError, UploadPartRequest,
 };
 use rusoto_sts::WebIdentityProvider;
 use tokio::io::AsyncReadExt;

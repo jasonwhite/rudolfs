@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
-use futures::{stream::StreamExt, Stream};
+use futures::{Stream, stream::StreamExt};
 
 use super::{LFSObject, Storage, StorageKey, StorageStream};
 

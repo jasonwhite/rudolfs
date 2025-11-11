@@ -43,14 +43,14 @@ use std::net::SocketAddr;
 use std::path::Path;
 
 use futures::future::Either;
-use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use rudolfs::S3ServerBuilder;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
-use common::{init_logger, GitRepo, SERVER_ADDR};
+use common::{GitRepo, SERVER_ADDR, init_logger};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Credentials {
@@ -68,9 +68,11 @@ fn load_s3_credentials() -> io::Result<Credentials> {
     // separate credentials than what is used in production.
     let creds: Credentials = toml::from_slice(&config)?;
 
-    std::env::set_var("AWS_ACCESS_KEY_ID", &creds.access_key_id);
-    std::env::set_var("AWS_SECRET_ACCESS_KEY", &creds.secret_access_key);
-    std::env::set_var("AWS_DEFAULT_REGION", &creds.default_region);
+    unsafe {
+        std::env::set_var("AWS_ACCESS_KEY_ID", &creds.access_key_id);
+        std::env::set_var("AWS_SECRET_ACCESS_KEY", &creds.secret_access_key);
+        std::env::set_var("AWS_DEFAULT_REGION", &creds.default_region);
+    }
 
     Ok(creds)
 }
@@ -92,7 +94,7 @@ async fn s3_smoke_test_encrypted() -> Result<(), Box<dyn std::error::Error>> {
     // times.
     let mut rng = StdRng::seed_from_u64(42);
 
-    let key = rng.gen();
+    let key = rng.r#gen();
 
     let mut server = S3ServerBuilder::new(creds.bucket);
     server.key(key);
