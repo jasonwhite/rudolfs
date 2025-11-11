@@ -94,7 +94,7 @@ async fn s3_smoke_test_encrypted() -> Result<(), Box<dyn std::error::Error>> {
     // times.
     let mut rng = StdRng::seed_from_u64(42);
 
-    let key = rng.r#gen();
+    let key = rng.random();
 
     let mut server = S3ServerBuilder::new(creds.bucket);
     server.key(key);
