@@ -60,7 +60,7 @@ struct Credentials {
     bucket: String,
 }
 
-fn load_s3_credentials() -> io::Result<Credentials> {
+fn load_s3_credentials() -> Result<Credentials, Box<dyn std::error::Error>> {
     let config = fs::read("tests/.test_credentials.toml")?;
 
     // Try to load S3 credentials `.test_credentials.toml`. If they don't exist,
