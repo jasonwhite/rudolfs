@@ -46,10 +46,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{
+    Future,
     channel::mpsc,
     sink::SinkExt,
     stream::{BoxStream, Stream, StreamExt},
-    Future,
 };
 
 /// Stream returned by storage operations.

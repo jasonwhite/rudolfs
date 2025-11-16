@@ -24,15 +24,15 @@ use std::fmt;
 use std::ops;
 use std::str::FromStr;
 
-use futures::{ready, Stream};
+use futures::{Stream, ready};
 use hex::{FromHex, FromHexError, ToHex};
 use serde::{
+    Deserialize, Serialize,
     de::{self, Deserializer, Visitor},
     ser::Serializer,
-    Deserialize, Serialize,
 };
 
-use generic_array::{typenum, GenericArray};
+use generic_array::{GenericArray, typenum};
 use sha2::{self, Digest};
 
 /// An error associated with parsing a SHA256.

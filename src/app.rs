@@ -29,8 +29,8 @@ use futures::{
     stream::TryStreamExt,
 };
 use http::HeaderMap;
-use http::{self, header, StatusCode, Uri};
-use hyper::{self, body::Body, service::Service, Method, Request, Response};
+use http::{self, StatusCode, Uri, header};
+use hyper::{self, Method, Request, Response, body::Body, service::Service};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
@@ -124,7 +124,7 @@ where
             _ => {
                 return Ok(Response::builder()
                     .status(StatusCode::BAD_REQUEST)
-                    .body(Body::from("Missing org/project in URL"))?)
+                    .body(Body::from("Missing org/project in URL"))?);
             }
         };
 
@@ -137,7 +137,7 @@ where
                     None => {
                         return Ok(Response::builder()
                             .status(StatusCode::BAD_REQUEST)
-                            .body(Body::from("Missing OID parameter."))?)
+                            .body(Body::from("Missing OID parameter."))?);
                     }
                 };
 
@@ -224,12 +224,12 @@ where
         let val: lfs::VerifyRequest = from_json(req.into_body()).await?;
         let key = StorageKey::new(namespace, val.oid);
 
-        if let Some(size) = storage.size(&key).await? {
-            if size == val.size {
-                return Ok(Response::builder()
-                    .status(StatusCode::OK)
-                    .body(Body::empty())?);
-            }
+        if let Some(size) = storage.size(&key).await?
+            && size == val.size
+        {
+            return Ok(Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::empty())?);
         }
 
         // Object doesn't exist or the size is incorrect.
@@ -472,11 +472,7 @@ fn extract_auth_header(
         }
     });
     let map = BTreeMap::from_iter(headers);
-    if map.is_empty() {
-        None
-    } else {
-        Some(map)
-    }
+    if map.is_empty() { None } else { Some(map) }
 }
 
 impl<S> Service<Request<Body>> for App<S>
