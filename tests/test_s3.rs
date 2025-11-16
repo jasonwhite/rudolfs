@@ -60,7 +60,7 @@ struct Credentials {
     bucket: String,
 }
 
-fn load_s3_credentials() -> io::Result<Credentials> {
+fn load_s3_credentials() -> Result<Credentials, Box<dyn std::error::Error>> {
     let config = fs::read("tests/.test_credentials.toml")?;
 
     // Try to load S3 credentials `.test_credentials.toml`. If they don't exist,
@@ -94,7 +94,7 @@ async fn s3_smoke_test_encrypted() -> Result<(), Box<dyn std::error::Error>> {
     // times.
     let mut rng = StdRng::seed_from_u64(42);
 
-    let key = rng.r#gen();
+    let key = rng.random();
 
     let mut server = S3ServerBuilder::new(creds.bucket);
     server.key(key);

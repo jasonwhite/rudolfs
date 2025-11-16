@@ -23,7 +23,7 @@ use backoff::future::retry;
 use bytes::{Bytes, BytesMut};
 use derive_more::{Display, From};
 use futures::{stream, stream::TryStreamExt};
-use http::{HeaderMap, StatusCode};
+use hyper::{HeaderMap, StatusCode};
 use rusoto_core::request::BufferedHttpResponse;
 use rusoto_core::{HttpClient, Region, RusotoError};
 use rusoto_credential::{

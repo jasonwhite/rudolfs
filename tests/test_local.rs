@@ -42,7 +42,7 @@ async fn local_smoke_test_encrypted() -> Result<(), Box<dyn std::error::Error>>
     let mut rng = StdRng::seed_from_u64(42);
 
     let data = tempfile::TempDir::new()?;
-    let key = rng.r#gen();
+    let key = rng.random();
 
     let mut server = LocalServerBuilder::new(data.path().into());
     server.key(key);
