@@ -261,7 +261,11 @@ impl<C> Backend<C> {
     }
 
     fn key_to_path(&self, key: &StorageKey) -> String {
-        format!("{}/{}/{}", self.prefix, key.namespace(), key.oid().path())
+        if self.prefix.is_empty() {
+            format!("{}/{}", key.namespace(), key.oid().path())
+        } else {
+            format!("{}/{}/{}", self.prefix, key.namespace(), key.oid().path())
+        }
     }
 }
 
