@@ -101,7 +101,8 @@ struct S3Args {
     #[structopt(long, env = "RUDOLFS_S3_BUCKET")]
     bucket: String,
 
-    /// Amazon S3 path prefix to use.
+    /// Amazon S3 path prefix to use: `<prefix>/<namespace>/<oid>`
+    /// Passing an empty string omits the prefix: `<namespace>/<oid>`.
     #[structopt(long, default_value = "lfs", env = "RUDOLFS_S3_PREFIX")]
     prefix: String,
 
