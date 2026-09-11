@@ -17,44 +17,42 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::Duration;
+
 use async_trait::async_trait;
+use aws_config::BehaviorVersion;
+use aws_sdk_s3::Client;
+use aws_sdk_s3::config::Region;
+use aws_sdk_s3::error::SdkError;
+use aws_sdk_s3::operation::complete_multipart_upload::CompleteMultipartUploadError;
+use aws_sdk_s3::operation::create_multipart_upload::CreateMultipartUploadError;
+use aws_sdk_s3::operation::get_object::GetObjectError;
+use aws_sdk_s3::operation::head_bucket::HeadBucketError;
+use aws_sdk_s3::operation::head_object::HeadObjectError;
+use aws_sdk_s3::operation::put_object::PutObjectError;
+use aws_sdk_s3::operation::upload_part::UploadPartError;
+use aws_sdk_s3::presigning::PresigningConfig;
+use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use backoff::ExponentialBackoff;
 use backoff::future::retry;
 use bytes::{Bytes, BytesMut};
 use derive_more::{Display, From};
-use futures::{stream, stream::TryStreamExt};
-use hyper::{HeaderMap, StatusCode};
-use rusoto_core::request::BufferedHttpResponse;
-use rusoto_core::{HttpClient, Region, RusotoError};
-use rusoto_credential::{
-    AutoRefreshingProvider, DefaultCredentialsProvider, ProvideAwsCredentials,
-};
-use rusoto_s3::{
-    CompleteMultipartUploadError, CompleteMultipartUploadRequest,
-    CompletedMultipartUpload, CompletedPart, CreateMultipartUploadError,
-    CreateMultipartUploadRequest, GetObjectError, GetObjectRequest,
-    HeadBucketError, HeadBucketRequest, HeadObjectError, HeadObjectRequest,
-    PutObjectError, PutObjectRequest, S3, S3Client, StreamingBody,
-    UploadPartError, UploadPartRequest,
-};
-use rusoto_sts::WebIdentityProvider;
-use tokio::io::AsyncReadExt;
+use futures::stream;
+use futures::stream::{Stream, StreamExt};
 
 use super::{LFSObject, Storage, StorageKey, StorageStream};
-use rusoto_s3::util::{PreSignedRequest, PreSignedRequestOption};
-use std::time::Duration;
-
-type BoxedCredentialProvider =
-    Box<dyn ProvideAwsCredentials + Send + Sync + 'static>;
 
 #[derive(Debug, From, Display)]
 pub enum Error {
-    Get(RusotoError<GetObjectError>),
-    Put(RusotoError<PutObjectError>),
-    CreateMultipart(RusotoError<CreateMultipartUploadError>),
-    Upload(RusotoError<UploadPartError>),
-    CompleteMultipart(RusotoError<CompleteMultipartUploadError>),
-    Head(RusotoError<HeadObjectError>),
+    Get(SdkError<GetObjectError>),
+    Put(SdkError<PutObjectError>),
+    CreateMultipart(SdkError<CreateMultipartUploadError>),
+    Upload(SdkError<UploadPartError>),
+    CompleteMultipart(SdkError<CompleteMultipartUploadError>),
+    Head(SdkError<HeadObjectError>),
 
     Stream(std::io::Error),
 
@@ -64,9 +62,8 @@ pub enum Error {
     /// The uploaded object is too large.
     TooLarge(u64),
 
-    Tls(rusoto_core::request::TlsError),
-
-    Credentials(rusoto_credential::CredentialsError),
+    /// Error creating a presigned URL.
+    Presigning(aws_sdk_s3::presigning::PresigningConfigError),
 }
 
 impl ::std::error::Error for Error {}
@@ -101,37 +98,44 @@ impl InitError {
     }
 }
 
-impl From<RusotoError<HeadBucketError>> for InitError {
-    fn from(err: RusotoError<HeadBucketError>) -> Self {
+impl From<SdkError<HeadBucketError>> for InitError {
+    fn from(err: SdkError<HeadBucketError>) -> Self {
         match err {
-            RusotoError::Credentials(_) => InitError::Credentials,
-            RusotoError::Unknown(r) => {
-                // Rusoto really sucks at correctly reporting errors.
-                // Lets work around that here.
-                match r.status {
-                    StatusCode::NOT_FOUND => InitError::Bucket,
-                    StatusCode::FORBIDDEN => InitError::Credentials,
-                    _ => InitError::Other(format!(
-                        "S3 returned HTTP status {}",
-                        r.status
-                    )),
+            SdkError::ServiceError(service_err) => {
+                let err = service_err.into_err();
+                if err.is_not_found() {
+                    InitError::Bucket
+                } else {
+                    InitError::Other(err.to_string())
                 }
             }
-            RusotoError::Service(HeadBucketError::NoSuchBucket(_)) => {
-                InitError::Bucket
-            }
-            x => InitError::Other(x.to_string()),
+            SdkError::ConstructionFailure(_) => InitError::Credentials,
+            err => InitError::Other(err.to_string()),
         }
     }
 }
 
-/// Amazon S3 storage backend.
-pub struct Backend<C = S3Client> {
-    /// S3 client.
-    client: C,
+/// Wrapper that converts an S3 `ByteStream` into the byte stream type expected
+/// by the storage interface.
+struct S3ByteStream(ByteStream);
 
-    // AWS Credentials. Used for signing URLs.
-    credential_provider: BoxedCredentialProvider,
+impl Stream for S3ByteStream {
+    type Item = Result<Bytes, std::io::Error>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.0)
+            .poll_next(cx)
+            .map_err(std::io::Error::other)
+    }
+}
+
+/// Amazon S3 storage backend.
+pub struct Backend {
+    /// S3 client.
+    client: Client,
 
     /// Name of the bucket to use.
     bucket: String,
@@ -141,8 +145,6 @@ pub struct Backend<C = S3Client> {
 
     /// URL for the CDN. Example: https://lfscdn.myawesomegit.com
     cdn: Option<String>,
-
-    region: Region,
 }
 
 impl Backend {
@@ -156,7 +158,13 @@ impl Backend {
             prefix.pop();
         }
 
-        let region = if let Ok(endpoint) = std::env::var("AWS_S3_ENDPOINT") {
+        let mut config_loader = aws_config::defaults(BehaviorVersion::latest());
+
+        // Custom endpoints (e.g. MinIO) usually don't support virtual-host
+        // style addressing, so path-style must be forced.
+        let mut force_path_style = false;
+
+        if let Ok(endpoint) = std::env::var("AWS_S3_ENDPOINT") {
             // If a custom endpoint is set, do not use the AWS default
             // (us-east-1). Instead, check environment variables for a region
             // name.
@@ -171,77 +179,68 @@ impl Backend {
                     )
                 })?;
 
-            Region::Custom { name, endpoint }
-        } else {
-            Region::default()
-        };
+            config_loader = config_loader
+                .endpoint_url(endpoint)
+                .region(Region::new(name));
+
+            force_path_style = true;
+        }
+
+        // The default credential chain includes:
+        // 1. Environment variables
+        // 2. The AWS credentials file (~/.aws/credentials)
+        // 3. IAM instance profiles
+        // 4. Web identity tokens (e.g. Kubernetes IRSA)
+        let sdk_config = config_loader.load().await;
+
+        let region =
+            sdk_config
+                .region()
+                .map(|r| r.to_string())
+                .unwrap_or_else(|| {
+                    tracing::warn!(
+                        "No AWS region configured. Falling back to us-east-1."
+                    );
+                    "us-east-1".to_string()
+                });
 
         tracing::info!(
             "Connecting to S3 bucket '{}' at region '{}'",
             bucket,
-            region.name()
+            region
         );
 
-        // Check if there is any k8s credential provider. If there is, use it.
-        let k8s_provider = WebIdentityProvider::from_k8s_env();
+        let client = aws_sdk_s3::config::Builder::from(&sdk_config)
+            .force_path_style(force_path_style)
+            .build();
 
-        let (client, credential_provider): (_, BoxedCredentialProvider) =
-            if k8s_provider.credentials().await.is_ok() {
-                tracing::info!("Using credentials from Kubernetes");
-                let provider = AutoRefreshingProvider::new(k8s_provider)?;
-                let client = S3Client::new_with(
-                    HttpClient::new()?,
-                    provider.clone(),
-                    region.clone(),
-                );
-                (client, Box::new(provider))
-            } else {
-                let client = S3Client::new(region.clone());
-                let provider = DefaultCredentialsProvider::new()?;
-                (client, Box::new(provider))
-            };
+        let client = Client::from_conf(client);
 
-        Backend::with_client(
-            client,
-            bucket,
-            prefix,
-            cdn,
-            region,
-            credential_provider,
-        )
-        .await
+        Backend::with_client(client, bucket, prefix, cdn).await
     }
 }
 
-impl<C> Backend<C> {
+impl Backend {
     pub async fn with_client(
-        client: C,
+        client: Client,
         bucket: String,
         prefix: String,
         cdn: Option<String>,
-        region: Region,
-        credential_provider: BoxedCredentialProvider,
-    ) -> Result<Self, Error>
-    where
-        C: S3 + Clone,
-    {
+    ) -> Result<Self, Error> {
         // Perform a HEAD operation to check that the bucket exists and that
         // our credentials work. This helps catch very common errors early on
         // in application startup.
-        let req = HeadBucketRequest {
-            bucket: bucket.clone(),
-            ..Default::default()
-        };
-
-        let c = client.clone();
-
+        //
         // We need to retry here so that any fake S3 services have a chance to
         // start up alongside Rudolfs.
         retry(ExponentialBackoff::default(), || async {
             // Note that we don't retry certain failures, like credential or
             // missing bucket errors. These are unlikely to be transient
             // errors.
-            c.head_bucket(req.clone())
+            client
+                .head_bucket()
+                .bucket(&bucket)
+                .send()
                 .await
                 .map_err(InitError::from)
                 .map_err(InitError::into_backoff)
@@ -255,8 +254,6 @@ impl<C> Backend<C> {
             bucket,
             prefix,
             cdn,
-            region,
-            credential_provider,
         })
     }
 
@@ -270,31 +267,38 @@ impl<C> Backend<C> {
 }
 
 #[async_trait]
-impl<C> Storage for Backend<C>
-where
-    C: S3 + Send + Sync,
-{
+impl Storage for Backend {
     type Error = Error;
 
     async fn get(
         &self,
         key: &StorageKey,
     ) -> Result<Option<LFSObject>, Self::Error> {
-        let request = GetObjectRequest {
-            bucket: self.bucket.clone(),
-            key: self.key_to_path(key),
-            response_content_type: Some("application/octet-stream".into()),
-            ..Default::default()
-        };
+        let object = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(self.key_to_path(key))
+            .response_content_type("application/octet-stream")
+            .send()
+            .await;
 
-        Ok(match self.client.get_object(request).await {
-            Ok(object) => Ok(Some(LFSObject::new(
-                object.content_length.unwrap() as u64,
-                Box::pin(object.body.unwrap().map_ok(Bytes::from)),
-            ))),
-            Err(RusotoError::Service(GetObjectError::NoSuchKey(_))) => Ok(None),
-            Err(err) => Err(err),
-        }?)
+        match object {
+            Ok(object) => {
+                let len = object.content_length().unwrap_or(0) as u64;
+                let stream = S3ByteStream(object.body);
+                Ok(Some(LFSObject::new(len, Box::pin(stream))))
+            }
+            Err(err) => {
+                if let Some(GetObjectError::NoSuchKey(_)) =
+                    err.as_service_error()
+                {
+                    return Ok(None);
+                }
+
+                Err(Error::Get(err))
+            }
+        }
     }
 
     async fn put(
@@ -307,18 +311,17 @@ where
         let mu_response = retry(ExponentialBackoff::default(), || async {
             Ok(self
                 .client
-                .create_multipart_upload(CreateMultipartUploadRequest {
-                    bucket: self.bucket.clone(),
-                    key: self.key_to_path(&key),
-                    ..Default::default()
-                })
+                .create_multipart_upload()
+                .bucket(&self.bucket)
+                .key(self.key_to_path(&key))
+                .send()
                 .await?)
         })
         .await?;
 
-        // Okay to unwrap. This would only be None  there is a bug in either
-        // Rusoto or S3 itself.
-        let upload_id = mu_response.upload_id.unwrap();
+        // Okay to unwrap. This would only be None if there is a bug in
+        // either the SDK or S3 itself.
+        let upload_id = mu_response.upload_id().unwrap().to_string();
 
         // 100 MB
         const CHUNK_SIZE: usize = 100 * 1024 * 1024;
@@ -326,44 +329,51 @@ where
         let mut buffer = BytesMut::with_capacity(CHUNK_SIZE);
         let mut part_number = 1;
         let mut completed_parts = Vec::new();
-        let mut streaming_body = StreamingBody::new(stream).into_async_read();
+        let mut stream = stream;
 
         loop {
-            let size = streaming_body.read_buf(&mut buffer).await?;
+            // Accumulate bytes into the buffer until we have a full chunk or
+            // the stream ends.
+            let mut stream_done = false;
 
-            if buffer.len() < CHUNK_SIZE && size != 0 {
-                continue;
+            while buffer.len() < CHUNK_SIZE {
+                match stream.next().await {
+                    Some(Ok(bytes)) => buffer.extend_from_slice(&bytes),
+                    Some(Err(e)) => return Err(Error::Stream(e)),
+                    None => {
+                        stream_done = true;
+                        break;
+                    }
+                }
             }
 
             let chunk = buffer.split().freeze();
 
             let up_response = retry(ExponentialBackoff::default(), || async {
                 let chunk = chunk.clone();
-                let chunk_len = chunk.len();
-                let body =
-                    StreamingBody::new(Box::pin(stream::once(async move {
-                        Ok(chunk)
-                    })));
+                let body = ByteStream::from(chunk);
 
-                let req = UploadPartRequest {
-                    content_length: Some(chunk_len as i64),
-                    body: Some(body),
-                    bucket: self.bucket.clone(),
-                    key: self.key_to_path(&key),
-                    part_number,
-                    upload_id: upload_id.clone(),
-                    ..Default::default()
-                };
-                Ok(self.client.upload_part(req).await?)
+                Ok(self
+                    .client
+                    .upload_part()
+                    .bucket(&self.bucket)
+                    .key(self.key_to_path(&key))
+                    .part_number(part_number)
+                    .upload_id(&upload_id)
+                    .body(body)
+                    .send()
+                    .await?)
             })
             .await?;
 
-            completed_parts.push(CompletedPart {
-                e_tag: up_response.e_tag.clone(),
-                part_number: Some(part_number),
-            });
+            completed_parts.push(
+                CompletedPart::builder()
+                    .e_tag(up_response.e_tag().unwrap_or(""))
+                    .part_number(part_number)
+                    .build(),
+            );
 
-            if size == 0 {
+            if stream_done {
                 // The stream has ended.
                 break;
             } else {
@@ -373,32 +383,18 @@ where
 
         // Complete the upload.
         retry(ExponentialBackoff::default(), || async {
-            let req = CompleteMultipartUploadRequest {
-                bucket: self.bucket.clone(),
-                key: self.key_to_path(&key),
-                multipart_upload: Some(CompletedMultipartUpload {
-                    parts: Some(completed_parts.clone()),
-                }),
-                upload_id: upload_id.clone(),
-                ..Default::default()
-            };
+            let multipart_upload = CompletedMultipartUpload::builder()
+                .set_parts(Some(completed_parts.clone()))
+                .build();
 
-            let output = self.client.complete_multipart_upload(req).await?;
-
-            // Workaround: https://github.com/rusoto/rusoto/issues/1936
-            // Rusoto may return `Ok` when there is a failure.
-            if output.location.is_none()
-                && output.e_tag.is_none()
-                && output.bucket.is_none()
-                && output.key.is_none()
-            {
-                return Err(RusotoError::Unknown(BufferedHttpResponse {
-                    status: StatusCode::from_u16(500).unwrap(),
-                    headers: HeaderMap::with_capacity(0),
-                    body: Bytes::from_static(b"HTTP 500 internal error"),
-                })
-                .into());
-            }
+            self.client
+                .complete_multipart_upload()
+                .bucket(&self.bucket)
+                .key(self.key_to_path(&key))
+                .multipart_upload(multipart_upload)
+                .upload_id(&upload_id)
+                .send()
+                .await?;
 
             Ok(())
         })
@@ -408,27 +404,26 @@ where
     }
 
     async fn size(&self, key: &StorageKey) -> Result<Option<u64>, Self::Error> {
-        let request = HeadObjectRequest {
-            bucket: self.bucket.clone(),
-            key: self.key_to_path(key),
-            ..Default::default()
-        };
+        let object = self
+            .client
+            .head_object()
+            .bucket(&self.bucket)
+            .key(self.key_to_path(key))
+            .send()
+            .await;
 
-        Ok(match self.client.head_object(request).await {
-            Ok(object) => Ok(Some(object.content_length.unwrap() as u64)),
-            Err(RusotoError::Unknown(e)) if e.status == 404 => {
-                // There is a bug in Rusoto that causes it to always return an
-                // "unknown" error when the key does not exist. Thus we must
-                // check the error code manually.
-                //
-                // See: https://github.com/rusoto/rusoto/issues/716
-                Ok(None)
+        match object {
+            Ok(object) => Ok(Some(object.content_length().unwrap_or(0) as u64)),
+            Err(err) => {
+                if let Some(HeadObjectError::NotFound(_)) =
+                    err.as_service_error()
+                {
+                    return Ok(None);
+                }
+
+                Err(Error::Head(err))
             }
-            Err(RusotoError::Service(HeadObjectError::NoSuchKey(_))) => {
-                Ok(None)
-            }
-            Err(err) => Err(err),
-        }?)
+        }
     }
 
     /// This never deletes objects from S3 and always returns success. This may
@@ -457,17 +452,18 @@ where
         // uploads will bypass the encryption process and fail to download.
         self.cdn.as_ref()?;
 
-        let request = PutObjectRequest {
-            bucket: self.bucket.clone(),
-            key: self.key_to_path(key),
-            ..Default::default()
-        };
-        let credentials = self.credential_provider.credentials().await.ok()?;
-        let presigned_url = request.get_presigned_url(
-            &self.region,
-            &credentials,
-            &PreSignedRequestOption { expires_in },
-        );
-        Some(presigned_url)
+        let presigning_config =
+            PresigningConfig::expires_in(expires_in).ok()?;
+
+        let presigned_request = self
+            .client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(self.key_to_path(key))
+            .presigned(presigning_config)
+            .await
+            .ok()?;
+
+        Some(presigned_request.uri().to_string())
     }
 }

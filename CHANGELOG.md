@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+ - Replaced the unmaintained Rusoto crate with Amazon's official AWS SDK for
+   Rust (`aws-sdk-s3`). (#66)
+   - Kubernetes IRSA (web identity) credentials are now supported via the
+     SDK's default credential chain.
+   - Custom endpoints (`$AWS_S3_ENDPOINT`) now use path-style addressing,
+     which improves compatibility with MinIO and other self-hosted S3
+     services.
+
 ## v0.3.8
 
  - Send html content type on index page

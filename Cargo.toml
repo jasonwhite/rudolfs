@@ -48,23 +48,15 @@ tempfile = "3"
 duct = "1.1"
 toml = "0.9"
 
-[dependencies.rusoto_core]
-version = "0.48"
-default-features = false
-features = ["rustls"]
-
-[dependencies.rusoto_credential]
-version = "0.48"
-
-[dependencies.rusoto_sts]
-version = "0.48"
-features = ["rustls"]
+[dependencies.aws-config]
+version = "1"
+features = ["behavior-version-latest", "rustls", "rt-tokio"]
 default-features = false
 
-[dependencies.rusoto_s3]
-version = "0.48"
-default-features = false
+[dependencies.aws-sdk-s3]
+version = "1.146.0"
 features = ["rustls"]
+default-features = false
 
 [features]
 default = []
