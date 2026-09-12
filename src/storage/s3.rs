@@ -26,57 +26,31 @@ use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::Region;
 use aws_sdk_s3::error::SdkError;
-use aws_sdk_s3::operation::complete_multipart_upload::CompleteMultipartUploadError;
-use aws_sdk_s3::operation::create_multipart_upload::CreateMultipartUploadError;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_bucket::HeadBucketError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
-use aws_sdk_s3::operation::put_object::PutObjectError;
-use aws_sdk_s3::operation::upload_part::UploadPartError;
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use backoff::ExponentialBackoff;
 use backoff::future::retry;
 use bytes::{Bytes, BytesMut};
-use derive_more::{Display, From};
 use futures::stream;
 use futures::stream::{Stream, StreamExt};
 
 use super::{LFSObject, Storage, StorageKey, StorageStream};
 
-#[derive(Debug, From, Display)]
-pub enum Error {
-    Get(SdkError<GetObjectError>),
-    Put(SdkError<PutObjectError>),
-    CreateMultipart(SdkError<CreateMultipartUploadError>),
-    Upload(SdkError<UploadPartError>),
-    CompleteMultipart(SdkError<CompleteMultipartUploadError>),
-    Head(SdkError<HeadObjectError>),
+use anyhow::{Context as _, Error};
 
-    Stream(std::io::Error),
-
-    /// Initialization error.
-    Init(InitError),
-
-    /// The uploaded object is too large.
-    TooLarge(u64),
-
-    /// Error creating a presigned URL.
-    Presigning(aws_sdk_s3::presigning::PresigningConfigError),
-}
-
-impl ::std::error::Error for Error {}
-
-#[derive(Debug, Display)]
+#[derive(Debug, thiserror::Error)]
 pub enum InitError {
-    #[display("Invalid S3 bucket name")]
+    #[error("Invalid S3 bucket name")]
     Bucket,
 
-    #[display("Invalid S3 credentials")]
+    #[error("Invalid S3 credentials")]
     Credentials,
 
-    #[display("{_0}")]
+    #[error("{0}")]
     Other(String),
 }
 
@@ -245,7 +219,10 @@ impl Backend {
                 .map_err(InitError::from)
                 .map_err(InitError::into_backoff)
         })
-        .await?;
+        .await
+        .with_context(|| {
+            format!("HEAD operation failed on bucket '{bucket}'")
+        })?;
 
         tracing::info!("Successfully authorized with AWS");
 
@@ -296,7 +273,7 @@ impl Storage for Backend {
                     return Ok(None);
                 }
 
-                Err(Error::Get(err))
+                Err(err.into())
             }
         }
     }
@@ -339,7 +316,7 @@ impl Storage for Backend {
             while buffer.len() < CHUNK_SIZE {
                 match stream.next().await {
                     Some(Ok(bytes)) => buffer.extend_from_slice(&bytes),
-                    Some(Err(e)) => return Err(Error::Stream(e)),
+                    Some(Err(e)) => return Err(e.into()),
                     None => {
                         stream_done = true;
                         break;
@@ -421,7 +398,7 @@ impl Storage for Backend {
                     return Ok(None);
                 }
 
-                Err(Error::Head(err))
+                Err(err.into())
             }
         }
     }
