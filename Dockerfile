@@ -1,4 +1,4 @@
-FROM rust:1.91.1 as build
+FROM rust:1.98.1 as build
 
 ARG TARGETARCH
 
