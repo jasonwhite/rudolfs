@@ -1,6 +1,5 @@
 # Rudo*lfs*
 
-[![Cirrus CI - Specific Branch Build Status](https://img.shields.io/cirrus/github/jasonwhite/rudolfs/master?style=for-the-badge)](https://cirrus-ci.com/github/jasonwhite/rudolfs)
 [![Crates.io](https://img.shields.io/crates/v/rudolfs?style=for-the-badge)](https://crates.io/crates/rudolfs)
 [![AUR version](https://img.shields.io/aur/version/rudolfs?style=for-the-badge)](https://aur.archlinux.org/packages/rudolfs/)
 [![Docker Image Version (latest semver)](https://img.shields.io/docker/v/jasonwhite0/rudolfs?label=Docker&sort=semver&style=for-the-badge)](https://hub.docker.com/r/jasonwhite0/rudolfs)
