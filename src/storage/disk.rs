@@ -184,7 +184,11 @@ impl Storage for Backend {
                         let mut tier2 = fs::read_dir(entry.path()).await?;
 
                         while let Some(entry) = tier2.next_entry().await? {
-                            yield entry;
+                            let mut files = fs::read_dir(entry.path()).await?;
+
+                            while let Some(entry) = files.next_entry().await? {
+                                yield entry;
+                            }
                         }
                     }
                 }
@@ -305,5 +309,34 @@ impl Encoder<Bytes> for BytesCodec {
         buf.reserve(len);
         buf.put(data);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn list_yields_stored_objects() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Backend::new(dir.path().to_path_buf()).await.unwrap();
+
+        let data = Bytes::from_static(b"hello world");
+        let oid = Oid::from_str(
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+        )
+        .unwrap();
+        let key = StorageKey::new(
+            Namespace::new("org".into(), "project".into()),
+            oid,
+        );
+
+        let stream = futures::stream::once(futures::future::ok(data.clone()));
+        let object = LFSObject::new(data.len() as u64, Box::pin(stream));
+        storage.put(key.clone(), object).await.unwrap();
+
+        let listed: Vec<_> = storage.list().try_collect().await.unwrap();
+
+        assert!(listed == vec![(key, data.len() as u64)]);
     }
 }
